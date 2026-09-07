@@ -73,7 +73,9 @@ class NativeImageStreamCompleter extends ImageStreamCompleter
       frame.image.dispose();
       return;
     }
-    setImage(ImageInfo(image: frame.image, scale: scale, debugLabel: debugLabel));
+    setImage(
+      ImageInfo(image: frame.image, scale: scale, debugLabel: debugLabel),
+    );
   }
 
   @override

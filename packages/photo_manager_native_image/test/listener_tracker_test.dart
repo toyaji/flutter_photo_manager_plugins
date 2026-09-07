@@ -68,7 +68,8 @@ void main() {
     handle.dispose();
   });
 
-  test('a widget listener added after the cache left is not mistaken '
+  test(
+      'a widget listener added after the cache left is not mistaken '
       'for the cache listener', () {
     final TrackedCompleter completer = TrackedCompleter();
     final ImageStreamListener cache = listener();

@@ -36,8 +36,7 @@ class GalleryPage extends StatefulWidget {
   State<GalleryPage> createState() => _GalleryPageState();
 }
 
-class _GalleryPageState extends State<GalleryPage>
-    with WidgetsBindingObserver {
+class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
   List<AssetPathEntity> _albums = const <AssetPathEntity>[];
   AssetPathEntity? _album;
   List<AssetEntity> _assets = const <AssetEntity>[];
@@ -217,7 +216,8 @@ class _GalleryPageState extends State<GalleryPage>
             PopupMenuButton<AssetPathEntity>(
               icon: const Icon(Icons.photo_album_outlined),
               onSelected: _selectAlbum,
-              itemBuilder: (BuildContext context) => <PopupMenuEntry<AssetPathEntity>>[
+              itemBuilder: (BuildContext context) =>
+                  <PopupMenuEntry<AssetPathEntity>>[
                 for (final AssetPathEntity album in _albums)
                   PopupMenuItem<AssetPathEntity>(
                     value: album,
@@ -343,8 +343,8 @@ class _MetricsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final NativeImageMetrics m = NativeImageMetrics.instance;
     final TextStyle style = Theme.of(context).textTheme.bodySmall!.copyWith(
-          fontFeatures: const <ui.FontFeature>[ui.FontFeature.tabularFigures()],
-        );
+      fontFeatures: const <ui.FontFeature>[ui.FontFeature.tabularFigures()],
+    );
     String cell(String label, Object? value) => '$label ${value ?? '-'}';
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -374,7 +374,8 @@ class _MetricsPanel extends StatelessWidget {
                   spacing: 12,
                   children: <Widget>[
                     Text(cell('p50', m.percentile(0.5)?.toString().padLeft(3))),
-                    Text(cell('p95', m.percentile(0.95)?.toString().padLeft(3))),
+                    Text(
+                        cell('p95', m.percentile(0.95)?.toString().padLeft(3))),
                     Text(cell('>16ms', jankFrames)),
                     Text(cell('memPressure', memoryPressureEvents)),
                     Text(

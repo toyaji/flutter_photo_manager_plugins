@@ -34,7 +34,7 @@ NativeAssetImage(
 
 ## How it differs from `photo_manager_image_provider`
 
-![Pipeline comparison](docs/images/pipeline-comparison.svg)
+![Pipeline comparison](doc/images/pipeline-comparison.svg)
 
 `AssetEntityImageProvider` asks `photo_manager` for thumbnail *bytes*. The
 platform decodes the asset, re-encodes it as JPEG (quality 95 on iOS), copies
@@ -62,7 +62,7 @@ Both providers are plain `ImageProvider`s and can coexist in one app.
 
 ## Request lifecycle
 
-![Request lifecycle](docs/images/request-lifecycle.svg)
+![Request lifecycle](doc/images/request-lifecycle.svg)
 
 1. An `Image` widget resolves the provider. The key is the provider itself:
    `(entity.id, modifiedDateSecond ?? createDateSecond, size, isVideo)`.
@@ -99,7 +99,7 @@ and a scrolled-away cell always stops its native work.
 
 ## Who owns what
 
-![Ownership](docs/images/ownership.svg)
+![Ownership](doc/images/ownership.svg)
 
 The package owns everything between "this key needs pixels" and "here is a
 frame". The app owns every policy decision above that.

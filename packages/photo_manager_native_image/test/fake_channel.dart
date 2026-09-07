@@ -37,7 +37,8 @@ class FakeChannel extends NativeImageChannel {
   void reply(int requestId, Map<String, int>? value) =>
       pending.remove(requestId)!.complete(value);
 
-  void fail(int requestId, String code) => pending.remove(requestId)!
+  void fail(int requestId, String code) => pending
+      .remove(requestId)!
       .completeError(PlatformException(code: code, message: 'x'));
 }
 

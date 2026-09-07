@@ -101,8 +101,7 @@ void main() {
     expect(r.isSettled, isTrue);
   });
 
-  test('oversized reply is scaled so the shorter side matches size',
-      () async {
+  test('oversized reply is scaled so the shorter side matches size', () async {
     final NativeImageRequest r = request(size: 16);
     final Future<ui.FrameInfo?> future = r.load();
     channel.reply(r.requestId, allocateBuffer(64, 32));
@@ -113,10 +112,8 @@ void main() {
   });
 
   test('platform errors map to typed codes', () async {
-    for (final (String wire, NativeImageErrorCode code) in <(
-      String,
-      NativeImageErrorCode
-    )>[
+    for (final (String wire, NativeImageErrorCode code)
+        in <(String, NativeImageErrorCode)>[
       ('not_found', NativeImageErrorCode.notFound),
       ('icloud_not_downloaded', NativeImageErrorCode.icloudNotDownloaded),
       ('decode_failed', NativeImageErrorCode.decodeFailed),

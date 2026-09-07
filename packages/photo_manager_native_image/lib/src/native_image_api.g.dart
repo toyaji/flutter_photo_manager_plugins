@@ -10,9 +10,9 @@ import 'package:flutter/services.dart';
 import 'package:meta/meta.dart' show immutable, protected, visibleForTesting;
 
 Object? _extractReplyValueOrThrow(
-    List<Object?>? replyList,
-    String channelName, {
-    required bool isNullValid,
+  List<Object?>? replyList,
+  String channelName, {
+  required bool isNullValid,
 }) {
   if (replyList == null) {
     throw PlatformException(
@@ -33,8 +33,6 @@ Object? _extractReplyValueOrThrow(
   }
   return replyList.firstOrNull;
 }
-
-
 
 class _PigeonCodec extends StandardMessageCodec {
   const _PigeonCodec();
@@ -61,9 +59,11 @@ class NativeImageHostApi {
   /// Constructor for [NativeImageHostApi]. The [binaryMessenger] named argument is
   /// available for dependency injection. If it is left null, the default
   /// BinaryMessenger will be used which routes to the host platform.
-  NativeImageHostApi({BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
+  NativeImageHostApi(
+      {BinaryMessenger? binaryMessenger, String messageChannelSuffix = ''})
       : pigeonVar_binaryMessenger = binaryMessenger,
-        pigeonVar_messageChannelSuffix = messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
+        pigeonVar_messageChannelSuffix =
+            messageChannelSuffix.isNotEmpty ? '.$messageChannelSuffix' : '';
   final BinaryMessenger? pigeonVar_binaryMessenger;
 
   static const MessageCodec<Object?> pigeonChannelCodec = _PigeonCodec();
@@ -80,42 +80,46 @@ class NativeImageHostApi {
   ///
   /// Errors use the codes `not_found`, `icloud_not_downloaded`, and
   /// `decode_failed`.
-  Future<Map<String, int>?> requestImage(String assetId, int requestId, int width, int height, bool isVideo, bool allowNetwork) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.photo_manager_native_image.NativeImageHostApi.requestImage$pigeonVar_messageChannelSuffix';
+  Future<Map<String, int>?> requestImage(String assetId, int requestId,
+      int width, int height, bool isVideo, bool allowNetwork) async {
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.photo_manager_native_image.NativeImageHostApi.requestImage$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[assetId, requestId, width, height, isVideo, allowNetwork]);
+    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(
+        <Object?>[assetId, requestId, width, height, isVideo, allowNetwork]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     final Object? pigeonVar_replyValue = _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: true,
-    )
-    ;
-    return (pigeonVar_replyValue as Map<Object?, Object?>?)?.cast<String, int>();
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: true,
+    );
+    return (pigeonVar_replyValue as Map<Object?, Object?>?)
+        ?.cast<String, int>();
   }
 
   /// Stops [requestId] if it has not allocated a buffer yet. A cancel that
   /// arrives before its request is remembered and applied when it does.
   Future<void> cancelRequest(int requestId) async {
-    final pigeonVar_channelName = 'dev.flutter.pigeon.photo_manager_native_image.NativeImageHostApi.cancelRequest$pigeonVar_messageChannelSuffix';
+    final pigeonVar_channelName =
+        'dev.flutter.pigeon.photo_manager_native_image.NativeImageHostApi.cancelRequest$pigeonVar_messageChannelSuffix';
     final pigeonVar_channel = BasicMessageChannel<Object?>(
       pigeonVar_channelName,
       pigeonChannelCodec,
       binaryMessenger: pigeonVar_binaryMessenger,
     );
-    final Future<Object?> pigeonVar_sendFuture = pigeonVar_channel.send(<Object?>[requestId]);
+    final Future<Object?> pigeonVar_sendFuture =
+        pigeonVar_channel.send(<Object?>[requestId]);
     final pigeonVar_replyList = await pigeonVar_sendFuture as List<Object?>?;
 
     _extractReplyValueOrThrow(
-        pigeonVar_replyList,
-        pigeonVar_channelName,
-        isNullValid: true,
-    )
-    ;
+      pigeonVar_replyList,
+      pigeonVar_channelName,
+      isNullValid: true,
+    );
   }
 }

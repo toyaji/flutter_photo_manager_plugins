@@ -61,7 +61,8 @@ class NativeAssetImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Image(
-      image: NativeImageProvider(entity, size: size, allowNetwork: allowNetwork),
+      image:
+          NativeImageProvider(entity, size: size, allowNetwork: allowNetwork),
       fit: fit,
       alignment: alignment,
       filterQuality: filterQuality,
