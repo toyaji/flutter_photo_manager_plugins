@@ -6,6 +6,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'network_policy.dart';
+
 /// Counters for the native pipeline, meant for the example app and for
 /// checking a device run (live buffers must return to zero).
 class NativeImageMetrics extends ChangeNotifier {
@@ -25,6 +27,9 @@ class NativeImageMetrics extends ChangeNotifier {
 
   /// Requests that ended with an error.
   int failed = 0;
+
+  /// Second attempts sent under [NetworkPolicy.fallback].
+  int fallbacks = 0;
 
   /// Requests sent but not yet answered.
   int inFlight = 0;
@@ -59,6 +64,7 @@ class NativeImageMetrics extends ChangeNotifier {
     completed = 0;
     cancelled = 0;
     failed = 0;
+    fallbacks = 0;
     inFlight = 0;
     maxInFlight = 0;
     liveBuffers = 0;
@@ -113,6 +119,11 @@ class NativeImageMetrics extends ChangeNotifier {
     failed++;
     _scheduleNotify();
   }
+
+  void _onFallback() {
+    fallbacks++;
+    _scheduleNotify();
+  }
 }
 
 /// Package-internal hooks kept off the public surface.
@@ -137,4 +148,7 @@ extension NativeImageMetricsInternal on NativeImageMetrics {
 
   /// A request failed.
   void markFailed() => _onFailed();
+
+  /// A fallback (network) attempt was sent.
+  void markFallback() => _onFallback();
 }

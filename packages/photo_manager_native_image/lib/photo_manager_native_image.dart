@@ -14,3 +14,4 @@ export 'src/native_image_metrics.dart';
 export 'src/native_image_provider.dart';
 export 'src/native_image_request.dart' show NativeImageBuffer, resizeTargetFor;
 export 'src/native_image_stream_completer.dart';
+export 'src/network_policy.dart';

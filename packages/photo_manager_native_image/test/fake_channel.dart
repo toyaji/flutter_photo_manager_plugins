@@ -10,6 +10,7 @@ import 'package:photo_manager_native_image/photo_manager_native_image.dart';
 class FakeChannel extends NativeImageChannel {
   final List<int> requested = <int>[];
   final List<int> cancelled = <int>[];
+  final Map<int, bool> networkOf = <int, bool>{};
   final Map<int, Completer<Map<String, int>?>> pending =
       <int, Completer<Map<String, int>?>>{};
 
@@ -23,6 +24,7 @@ class FakeChannel extends NativeImageChannel {
     required bool allowNetwork,
   }) {
     requested.add(requestId);
+    networkOf[requestId] = allowNetwork;
     final Completer<Map<String, int>?> completer =
         Completer<Map<String, int>?>();
     pending[requestId] = completer;

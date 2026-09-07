@@ -20,10 +20,14 @@ void main() {
     PaintingBinding.instance.imageCache.clear();
   });
 
-  NativeImageProvider provider({String id = 'a'}) {
+  NativeImageProvider provider({
+    String id = 'a',
+    NetworkPolicy network = NetworkPolicy.never,
+  }) {
     return NativeImageProvider(
       entity(id: id),
       size: 32,
+      network: network,
       channel: channel,
       debugFree: (Pointer<Uint8> p) {
         frees++;
@@ -92,6 +96,32 @@ void main() {
     );
     expect(PaintingBinding.instance.imageCache.pendingImageCount, 0);
     stream.removeListener(widget);
+  });
+
+  test('fallback: an icloud miss is retried and the frame fills the same key',
+      () async {
+    final NativeImageProvider p =
+        provider(id: 'e', network: NetworkPolicy.fallback);
+    final ImageStream stream = p.resolve(ImageConfiguration.empty);
+    ImageInfo? received;
+    Object? error;
+    final ImageStreamListener widget = ImageStreamListener(
+      (ImageInfo info, _) => received = info,
+      onError: (Object e, StackTrace? s) => error = e,
+    );
+    stream.addListener(widget);
+    await Future<void>.delayed(Duration.zero);
+    channel.fail(channel.requested.single, 'icloud_not_downloaded');
+    await pumpEventQueue();
+    expect(channel.requested, hasLength(2));
+    expect(PaintingBinding.instance.imageCache.pendingImageCount, 1);
+    channel.reply(channel.requested.last, allocateBuffer(4, 4));
+    await pumpEventQueue();
+    expect(error, isNull);
+    expect(received, isNotNull);
+    expect(PaintingBinding.instance.imageCache.currentSize, 1);
+    stream.removeListener(widget);
+    received!.dispose();
   });
 
   test('imageCache.clear() while loading does not cancel a visible image',

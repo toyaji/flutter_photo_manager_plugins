@@ -15,13 +15,16 @@ void main() {
   late int frees;
   late NativeImageMetrics metrics;
 
-  NativeImageRequest request({int size = 64}) {
+  NativeImageRequest request({
+    int size = 64,
+    NetworkPolicy policy = NetworkPolicy.never,
+  }) {
     return NativeImageRequest(
       channel: channel,
       assetId: 'a',
       size: size,
       isVideo: false,
-      allowNetwork: false,
+      policy: policy,
       free: (Pointer<Uint8> p) {
         frees++;
         malloc.free(p);
@@ -139,6 +142,114 @@ void main() {
     expect(r.load, throwsStateError);
     channel.reply(r.requestId, null);
     await first;
+  });
+
+  group('NetworkPolicy', () {
+    test('never: one local attempt, icloud error reported as is', () async {
+      final NativeImageRequest r = request(policy: NetworkPolicy.never);
+      final Future<ui.FrameInfo?> future = r.load();
+      channel.fail(r.requestId, 'icloud_not_downloaded');
+      await expectLater(
+        future,
+        throwsA(
+          isA<NativeImageException>().having(
+            (e) => e.code,
+            'code',
+            NativeImageErrorCode.icloudNotDownloaded,
+          ),
+        ),
+      );
+      expect(channel.requested, hasLength(1));
+      expect(channel.networkOf[channel.requested.single], isFalse);
+      expect(metrics.fallbacks, 0);
+      expect(metrics.failed, 1);
+    });
+
+    test('always: single attempt with network on', () async {
+      final NativeImageRequest r = request(policy: NetworkPolicy.always);
+      final Future<ui.FrameInfo?> future = r.load();
+      channel.reply(r.requestId, allocateBuffer(4, 4));
+      (await future)!.image.dispose();
+      expect(channel.requested, hasLength(1));
+      expect(channel.networkOf[channel.requested.single], isTrue);
+    });
+
+    test('fallback: icloud miss triggers one network attempt with a new id',
+        () async {
+      final NativeImageRequest r = request(policy: NetworkPolicy.fallback);
+      final Future<ui.FrameInfo?> future = r.load();
+      final int first = r.requestId;
+      channel.fail(first, 'icloud_not_downloaded');
+      await Future<void>.delayed(Duration.zero);
+      expect(channel.requested, hasLength(2));
+      final int second = channel.requested.last;
+      expect(second, isNot(first));
+      expect(r.requestId, second);
+      expect(channel.networkOf[first], isFalse);
+      expect(channel.networkOf[second], isTrue);
+      channel.reply(second, allocateBuffer(4, 4));
+      final ui.FrameInfo? frame = await future;
+      expect(frame, isNotNull);
+      frame!.image.dispose();
+      expect(metrics.fallbacks, 1);
+      expect(metrics.failed, 0);
+      expect(metrics.completed, 1);
+      expect(metrics.liveBuffers, 0);
+    });
+
+    test('fallback: the second failure is reported with its own code',
+        () async {
+      final NativeImageRequest r = request(policy: NetworkPolicy.fallback);
+      final Future<ui.FrameInfo?> future = r.load();
+      channel.fail(r.requestId, 'icloud_not_downloaded');
+      await Future<void>.delayed(Duration.zero);
+      channel.fail(channel.requested.last, 'decode_failed');
+      await expectLater(
+        future,
+        throwsA(
+          isA<NativeImageException>().having(
+            (e) => e.code,
+            'code',
+            NativeImageErrorCode.decodeFailed,
+          ),
+        ),
+      );
+      expect(channel.requested, hasLength(2));
+      expect(metrics.failed, 1);
+    });
+
+    test('fallback: a non-icloud first failure is not retried', () async {
+      final NativeImageRequest r = request(policy: NetworkPolicy.fallback);
+      final Future<ui.FrameInfo?> future = r.load();
+      channel.fail(r.requestId, 'not_found');
+      await expectLater(future, throwsA(isA<NativeImageException>()));
+      expect(channel.requested, hasLength(1));
+    });
+
+    test('fallback: cancel between attempts stops the second one', () async {
+      final NativeImageRequest r = request(policy: NetworkPolicy.fallback);
+      final Future<ui.FrameInfo?> future = r.load();
+      final int first = r.requestId;
+      // Cancel arrives after the platform replied but before Dart handles it.
+      r.cancel();
+      channel.fail(first, 'icloud_not_downloaded');
+      expect(await future, isNull);
+      expect(channel.requested, <int>[first]);
+      expect(channel.cancelled, <int>[first]);
+      expect(metrics.fallbacks, 0);
+    });
+
+    test('fallback: cancel during the second attempt targets its id', () async {
+      final NativeImageRequest r = request(policy: NetworkPolicy.fallback);
+      final Future<ui.FrameInfo?> future = r.load();
+      channel.fail(r.requestId, 'icloud_not_downloaded');
+      await Future<void>.delayed(Duration.zero);
+      final int second = channel.requested.last;
+      r.cancel();
+      expect(channel.cancelled, <int>[second]);
+      channel.reply(second, null);
+      expect(await future, isNull);
+    });
   });
 
   group('resizeTargetFor', () {

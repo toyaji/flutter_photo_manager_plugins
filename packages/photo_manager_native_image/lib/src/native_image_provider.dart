@@ -9,19 +9,20 @@ import 'package:photo_manager/photo_manager.dart';
 import 'native_image_channel.dart';
 import 'native_image_request.dart';
 import 'native_image_stream_completer.dart';
+import 'network_policy.dart';
 
 /// Loads an [AssetEntity] thumbnail decoded natively to RGBA.
 ///
 /// [size] is the pixel length of the shorter side (aspect fill); which sizes an
 /// app uses, and how many, is the app's policy. The cache key is
 /// `(entity.id, modified date, size, isVideo)`, so an edited asset reloads and
-/// [allowNetwork] does not split the cache.
+/// [network] does not split the cache.
 class NativeImageProvider extends ImageProvider<NativeImageProvider> {
   /// Creates a provider for [entity] at [size] pixels.
   NativeImageProvider(
     this.entity, {
     required this.size,
-    this.allowNetwork = false,
+    this.network = NetworkPolicy.fallback,
     this.scale = 1.0,
     NativeImageChannel? channel,
     NativeBufferFree? debugFree,
@@ -35,9 +36,10 @@ class NativeImageProvider extends ImageProvider<NativeImageProvider> {
   /// Pixel length of the shorter side of the decoded image.
   final int size;
 
-  /// iOS: allow PhotoKit to download an iCloud original. Such requests run on
-  /// a low-priority queue so they never block on-screen thumbnails.
-  final bool allowNetwork;
+  /// iOS: whether and when PhotoKit may download from iCloud. Network
+  /// attempts run on a low-priority queue so they never block on-screen
+  /// thumbnails.
+  final NetworkPolicy network;
 
   /// Scale reported in the resulting [ImageInfo].
   final double scale;
@@ -67,7 +69,7 @@ class NativeImageProvider extends ImageProvider<NativeImageProvider> {
       assetId: entity.id,
       size: size,
       isVideo: isVideo,
-      allowNetwork: allowNetwork,
+      policy: network,
       free: _debugFree,
     );
     return NativeImageStreamCompleter(
@@ -77,7 +79,7 @@ class NativeImageProvider extends ImageProvider<NativeImageProvider> {
         PaintingBinding.instance.imageCache.evict(key);
       },
       // Like NetworkImage: a failed key must not be served from the pending
-      // cache, so an `allowNetwork: true` retry can start a new load.
+      // cache, so the next resolve of the same asset starts a new load.
       onFailure: () => PaintingBinding.instance.imageCache.evict(key),
       scale: scale,
       debugLabel: '${entity.id}@$size',

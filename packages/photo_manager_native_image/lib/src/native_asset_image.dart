@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import 'native_image_provider.dart';
+import 'network_policy.dart';
 
 /// [Image] over a [NativeImageProvider].
 class NativeAssetImage extends StatelessWidget {
@@ -14,7 +15,7 @@ class NativeAssetImage extends StatelessWidget {
     this.entity, {
     required this.size,
     super.key,
-    this.allowNetwork = false,
+    this.network = NetworkPolicy.fallback,
     this.fit = BoxFit.cover,
     this.alignment = Alignment.center,
     this.filterQuality = FilterQuality.low,
@@ -31,8 +32,8 @@ class NativeAssetImage extends StatelessWidget {
   /// Pixel length of the shorter side of the decoded image.
   final int size;
 
-  /// See [NativeImageProvider.allowNetwork].
-  final bool allowNetwork;
+  /// See [NativeImageProvider.network].
+  final NetworkPolicy network;
 
   /// See [Image.fit].
   final BoxFit fit;
@@ -61,8 +62,7 @@ class NativeAssetImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Image(
-      image:
-          NativeImageProvider(entity, size: size, allowNetwork: allowNetwork),
+      image: NativeImageProvider(entity, size: size, network: network),
       fit: fit,
       alignment: alignment,
       filterQuality: filterQuality,

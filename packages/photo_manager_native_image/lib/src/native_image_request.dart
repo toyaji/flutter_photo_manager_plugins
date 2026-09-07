@@ -12,6 +12,7 @@ import 'package:flutter/services.dart';
 import 'native_image_channel.dart';
 import 'native_image_exception.dart';
 import 'native_image_metrics.dart';
+import 'network_policy.dart';
 
 /// Frees a buffer previously handed over by the platform.
 typedef NativeBufferFree = void Function(Pointer<Uint8> pointer);
@@ -69,6 +70,10 @@ class NativeImageBuffer {
 
 /// One native request from send to frame. Owns the buffer between the reply
 /// and the copy into an [ui.ImmutableBuffer].
+///
+/// With [NetworkPolicy.fallback] a local-only attempt that reports
+/// `icloud_not_downloaded` is followed by one network attempt; only the last
+/// attempt's outcome reaches the caller.
 class NativeImageRequest {
   /// Creates a request; nothing is sent until [load] is called.
   NativeImageRequest({
@@ -76,11 +81,10 @@ class NativeImageRequest {
     required this.assetId,
     required this.size,
     required this.isVideo,
-    required this.allowNetwork,
+    this.policy = NetworkPolicy.fallback,
     NativeBufferFree? free,
     NativeImageMetrics? metrics,
-  })  : requestId = NativeImageChannel.allocateRequestId(),
-        _free = free ?? malloc.free,
+  })  : _free = free ?? malloc.free,
         _metrics = metrics ?? NativeImageMetrics.instance;
 
   /// The channel the request goes through.
@@ -95,24 +99,39 @@ class NativeImageRequest {
   /// Whether the asset is a video (Android picks the MediaStore table).
   final bool isVideo;
 
-  /// iOS `isNetworkAccessAllowed`.
-  final bool allowNetwork;
-
-  /// Id shared with the platform for cancellation.
-  final int requestId;
+  /// Whether and when iCloud downloads are allowed.
+  final NetworkPolicy policy;
 
   final NativeBufferFree _free;
   final NativeImageMetrics _metrics;
 
+  int _requestId = NativeImageChannel.allocateRequestId();
   bool _sent = false;
   bool _cancelled = false;
   bool _settled = false;
+  bool _inFlight = false;
+
+  /// Id of the attempt currently shared with the platform. Each attempt gets
+  /// a fresh id so a late cancel for a finished attempt cannot be mistaken
+  /// for a cancel of the next one.
+  int get requestId => _requestId;
 
   /// Whether [cancel] has been called.
   bool get isCancelled => _cancelled;
 
   /// Whether [load] has produced its single outcome.
   bool get isSettled => _settled;
+
+  List<bool> get _attempts {
+    switch (policy) {
+      case NetworkPolicy.never:
+        return const <bool>[false];
+      case NetworkPolicy.fallback:
+        return const <bool>[false, true];
+      case NetworkPolicy.always:
+        return const <bool>[true];
+    }
+  }
 
   /// Sends the request and decodes the reply into a frame. Resolves to `null`
   /// when cancelled. Throws [NativeImageException] on failure.
@@ -121,31 +140,59 @@ class NativeImageRequest {
       throw StateError('load() may only be called once.');
     }
     _sent = true;
-    if (_cancelled) {
-      return _settle(() => null);
-    }
     final Stopwatch stopwatch = Stopwatch()..start();
+    final List<bool> attempts = _attempts;
+    for (int i = 0; i < attempts.length; i++) {
+      if (_cancelled) {
+        return _settle(() => null);
+      }
+      if (i > 0) {
+        _requestId = NativeImageChannel.allocateRequestId();
+        _metrics.markFallback();
+      }
+      final bool last = i == attempts.length - 1;
+      try {
+        final ui.FrameInfo? frame = await _attempt(allowNetwork: attempts[i]);
+        return _settle(() {
+          if (frame != null) {
+            _metrics.markCompleted(stopwatch.elapsed);
+          }
+          return frame;
+        });
+      } on NativeImageException catch (exception) {
+        if (!last &&
+            exception.code == NativeImageErrorCode.icloudNotDownloaded) {
+          continue;
+        }
+        _metrics.markFailed();
+        _settle(() => null);
+        rethrow;
+      }
+    }
+    return _settle(() => null);
+  }
+
+  Future<ui.FrameInfo?> _attempt({required bool allowNetwork}) async {
     _metrics.markRequested();
+    _inFlight = true;
     final Map<String, int>? reply;
     try {
       reply = await channel.requestImage(
         assetId: assetId,
-        requestId: requestId,
+        requestId: _requestId,
         width: size,
         height: size,
         isVideo: isVideo,
         allowNetwork: allowNetwork,
       );
     } on PlatformException catch (exception) {
+      throw NativeImageException.fromPlatform(exception);
+    } finally {
+      _inFlight = false;
       _metrics.markAnswered();
-      return _settle(() {
-        _metrics.markFailed();
-        throw NativeImageException.fromPlatform(exception);
-      });
     }
-    _metrics.markAnswered();
     if (reply == null) {
-      return _settle(() => null);
+      return null;
     }
 
     // Past this point the platform has allocated: copy, then free on every
@@ -164,7 +211,7 @@ class NativeImageRequest {
     }
     if (_cancelled) {
       immutable.dispose();
-      return _settle(() => null);
+      return null;
     }
 
     final ui.ImageDescriptor descriptor;
@@ -199,30 +246,27 @@ class NativeImageRequest {
     }
     if (_cancelled) {
       frame.image.dispose();
-      return _settle(() => null);
+      return null;
     }
-    return _settle(() {
-      _metrics.markCompleted(stopwatch.elapsed);
-      return frame;
-    });
+    return frame;
   }
 
-  /// Asks the platform to drop the request if it has not allocated yet.
-  /// Only the first call reaches the platform; a settled request ignores it.
+  /// Asks the platform to drop the current attempt if it has not allocated
+  /// yet, and stops any further attempt. Only the first call has an effect.
   void cancel() {
     if (_cancelled || _settled) {
       return;
     }
     _cancelled = true;
     _metrics.markCancelled();
-    if (_sent) {
-      channel.cancelRequest(requestId).ignore();
+    if (_inFlight) {
+      channel.cancelRequest(_requestId).ignore();
     }
   }
 
   T _settle<T>(T Function() body) {
     if (_settled) {
-      throw StateError('Request $requestId settled twice.');
+      throw StateError('Request $_requestId settled twice.');
     }
     _settled = true;
     return body();

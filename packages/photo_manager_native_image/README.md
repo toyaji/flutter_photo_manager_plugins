@@ -56,7 +56,7 @@ builds the image from the raw descriptor. There is no codec on the Dart side.
 | Sizing | `ThumbnailSize(width, height)` box | `size` = shorter side |
 | Cache key | id, size, format, original flag | id, modified date, size, isVideo |
 | Errors | `StateError` / platform message | `NativeImageException(code)` |
-| iCloud | downloads inline | reported as `icloudNotDownloaded`, opt in with `allowNetwork` |
+| iCloud | downloads inline, blocking the request | local first, then one low-priority network attempt (`NetworkPolicy`) |
 
 Both providers are plain `ImageProvider`s and can coexist in one app.
 
@@ -109,10 +109,11 @@ frame". The app owns every policy decision above that.
 | Which pixel sizes exist | App | e.g. 128 for dense grids, 320 for 2–6 columns. Pass the number; the package does not define tiers. |
 | How many requests are in flight | App | Driven by `cacheExtent`, layout changes during a pinch, prefetching. The package queues whatever it is asked and cancels what stops being needed; it does not throttle. |
 | `ImageCache` budget and `clear()` policy | App | The package uses the app's `PaintingBinding.imageCache` and nothing else. No second cache, no disk cache. |
-| Error UI, iCloud retry | App | `errorBuilder` receives `NativeImageException`. Retry an `icloudNotDownloaded` asset with `allowNetwork: true`. |
-| Cache key | Package | Edited assets get a new key through the modified date. `allowNetwork` is *not* part of the key, so a network retry fills the same slot. |
+| Error UI | App | `errorBuilder` receives `NativeImageException`. |
+| iCloud fallback | Package | `NetworkPolicy.fallback` (default): local first, then one network attempt on the low-priority queue. The app only picks the policy. |
+| Cache key | Package | Edited assets get a new key through the modified date. The network policy is *not* part of the key, so the fallback attempt fills the same slot. |
 | Cancellation | Package | Listener tracking in the completer, `cancelRequest` on the channel, `evict(key)` so the next resolve starts fresh. A failed load is evicted too, like `NetworkImage`. |
-| Native worker queues | Package | iOS: `OperationQueue` at `userInitiated`, cores × 2; a second queue at `utility` with 2 slots for `allowNetwork: true`. Android: fixed pool of cores / 2 + 1. |
+| Native worker queues | Package | iOS: `OperationQueue` at `userInitiated`, cores × 2; a second queue at `utility` with 2 slots for network attempts. Android: fixed pool of cores / 2 + 1. |
 | Buffer lifetime | Package | Exactly one reply per request, tracked by a `done` flag. Dart frees on every path. No finalizer, so no double free. |
 | Photo daemon reconnect (iOS) | Package | An XPC interruption evicts the cached `PHAsset` and retries once. |
 
@@ -140,7 +141,7 @@ a pinch.
 | Code | Meaning | Typical handling |
 |---|---|---|
 | `notFound` | The asset no longer exists | Drop the cell, refresh the album |
-| `icloudNotDownloaded` | iOS only: the original is in iCloud and `allowNetwork` was false | Show a cloud placeholder; retry with `allowNetwork: true` on tap or in a low-priority pass |
+| `icloudNotDownloaded` | iOS only: the asset is in iCloud and the policy did not allow a download, or the download attempt did not succeed | Show a cloud placeholder |
 | `decodeFailed` | The platform could not produce pixels | Broken-image placeholder |
 
 A failed key is evicted from `ImageCache`, so the next resolve of the same
@@ -154,6 +155,18 @@ samples, and live native buffers. `liveBuffers` must read 0 whenever the app is
 idle; anything else is a leak. The example app shows all of these in a panel
 and has a button that forces `PaintingBinding.handleMemoryPressure()` so the
 cancellation rules can be checked on a device.
+
+## iCloud (iOS)
+
+`NetworkPolicy` decides whether PhotoKit may download:
+
+| Policy | Behaviour | Use for |
+|---|---|---|
+| `fallback` (default) | Local first. If the asset is iCloud-only, one more request is sent with network access on the low-priority queue (two slots). The frame fills the same cache key; if that attempt fails too, its error is reported. | Grids and lists |
+| `never` | Local only; iCloud-only assets fail with `icloudNotDownloaded`. | Offline modes, data-saver settings |
+| `always` | Network from the first request. Every request goes through the two-slot download queue, so a grid built with it will crawl. | Detail views |
+
+On Android the policy is ignored; MediaStore assets are always local.
 
 ## Requirements
 

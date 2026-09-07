@@ -6,7 +6,10 @@
   trip.
 - iOS: `PHImageManager.requestImage` on a worker queue, `vImage` downscale,
   XPC reconnect retry, `icloud_not_downloaded` classification, low-priority
-  queue for network-allowed requests.
+  queue for network attempts.
+- `NetworkPolicy` (`fallback` by default): local first, then one network
+  attempt for iCloud-only assets; `never` and `always` for apps that want to
+  decide.
 - Android: `ContentResolver.loadThumbnail` / `ImageDecoder` on API 29+,
   `MediaStore.*.Thumbnails` and `BitmapFactory` with orientation correction on
   API 26–28, JNI `malloc` buffers.

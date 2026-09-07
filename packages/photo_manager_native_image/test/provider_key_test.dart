@@ -46,9 +46,9 @@ void main() {
     );
   });
 
-  test('allowNetwork does not split the cache', () {
+  test('network policy does not split the cache', () {
     expect(
-      NativeImageProvider(entity(), size: 320, allowNetwork: true),
+      NativeImageProvider(entity(), size: 320, network: NetworkPolicy.always),
       equals(NativeImageProvider(entity(), size: 320)),
     );
   });
