@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:photo_manager_image_provider/photo_manager_image_provider.dart';
 import 'package:photo_manager_native_image/photo_manager_native_image.dart';
 
 void main() => runApp(const ExampleApp());
@@ -15,6 +17,9 @@ const List<int> kColumnSteps = <int>[2, 3, 4, 6, 10];
 const int kBaseSize = 128;
 const int kMainSize = 320;
 
+/// Which provider the grid uses, so the two can be measured the same way.
+enum ProviderMode { native, imageProvider }
+
 class ExampleApp extends StatelessWidget {
   const ExampleApp({super.key});
 
@@ -25,6 +30,45 @@ class ExampleApp extends StatelessWidget {
       theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
       home: const GalleryPage(),
     );
+  }
+}
+
+/// Provider-agnostic timing: widget creation to first frame, measured through
+/// `Image.frameBuilder` so both providers are scored by the same clock.
+class FrameStats {
+  static final FrameStats instance = FrameStats();
+
+  int started = 0;
+  int firstFrames = 0;
+  int syncHits = 0;
+  final List<int> latenciesMs = <int>[];
+  final StreamController<int> _firstFrame = StreamController<int>.broadcast();
+
+  Stream<int> get onFirstFrame => _firstFrame.stream;
+
+  void reset() {
+    started = 0;
+    firstFrames = 0;
+    syncHits = 0;
+    latenciesMs.clear();
+  }
+
+  int? percentile(double p) {
+    if (latenciesMs.isEmpty) {
+      return null;
+    }
+    final List<int> sorted = List<int>.of(latenciesMs)..sort();
+    return sorted[((sorted.length - 1) * p).round()];
+  }
+
+  void recordFirstFrame(int ms, {required bool sync}) {
+    firstFrames++;
+    if (sync) {
+      syncHits++;
+    } else {
+      latenciesMs.add(ms);
+    }
+    _firstFrame.add(firstFrames);
   }
 }
 
@@ -43,6 +87,7 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
   String? _errorText;
   int _columnIndex = 2;
   bool _loadingMore = false;
+  ProviderMode _mode = ProviderMode.native;
   final ScrollController _scrollController = ScrollController();
   Drag? _drag;
 
@@ -50,41 +95,40 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
   int _jankFrames = 0;
   int _memoryPressureEvents = 0;
   double _pinchBase = 1;
+  bool _benchmarkRunning = false;
+  String? _benchmarkResult;
   late final TimingsCallback _timingsCallback;
+  Timer? _panelTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _timingsCallback = (List<ui.FrameTiming> timings) {
-      int jank = 0;
       for (final ui.FrameTiming timing in timings) {
         if (timing.totalSpan.inMicroseconds > 16667) {
-          jank++;
+          _jankFrames++;
         }
-      }
-      if (jank > 0 && mounted) {
-        setState(() => _jankFrames += jank);
       }
     };
     SchedulerBinding.instance.addTimingsCallback(_timingsCallback);
-    NativeImageMetrics.instance.addListener(_onMetrics);
+    // The panel polls instead of listening, so measuring never rebuilds the
+    // grid on every event.
+    _panelTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
     _load();
   }
 
   @override
   void dispose() {
     SchedulerBinding.instance.removeTimingsCallback(_timingsCallback);
-    NativeImageMetrics.instance.removeListener(_onMetrics);
+    _panelTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _scrollController.dispose();
     super.dispose();
-  }
-
-  void _onMetrics() {
-    if (mounted) {
-      setState(() {});
-    }
   }
 
   @override
@@ -199,10 +243,104 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
 
   void _resetMetrics() {
     NativeImageMetrics.instance.reset();
+    FrameStats.instance.reset();
     setState(() {
       _jankFrames = 0;
       _memoryPressureEvents = 0;
+      _benchmarkResult = null;
     });
+  }
+
+  void _setMode(ProviderMode mode) {
+    imageCache.clear();
+    imageCache.clearLiveImages();
+    _resetMetrics();
+    setState(() => _mode = mode);
+  }
+
+  /// Same scenario for every provider and device: cold fill, ten column
+  /// changes, one scroll round trip. Prints a summary line to the console.
+  Future<void> _runBenchmark() async {
+    if (_benchmarkRunning || !_scrollController.hasClients) {
+      return;
+    }
+    setState(() => _benchmarkRunning = true);
+    final Stopwatch total = Stopwatch()..start();
+    try {
+      _scrollController.jumpTo(0);
+      setState(() => _columnIndex = 2);
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+
+      // Cold fill: clear everything, rebuild the visible cells, time until
+      // 24 first frames have arrived.
+      imageCache.clear();
+      imageCache.clearLiveImages();
+      _resetMetrics();
+      final Stopwatch cold = Stopwatch()..start();
+      final Completer<void> filled = Completer<void>();
+      final StreamSubscription<int> sub =
+          FrameStats.instance.onFirstFrame.listen((int n) {
+        if (n >= 24 && !filled.isCompleted) {
+          filled.complete();
+        }
+      });
+      setState(() => _columnIndex = 1); // 3 columns: forces new cells
+      await filled.future
+          .timeout(const Duration(seconds: 15), onTimeout: () {});
+      cold.stop();
+      await sub.cancel();
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+
+      // Pinch cycles.
+      _resetMetrics();
+      final Stopwatch pinch = Stopwatch()..start();
+      const List<int> sequence = <int>[2, 4, 0, 3, 1, 4, 0, 2, 4, 2];
+      for (final int index in sequence) {
+        setState(() => _columnIndex = index);
+        await Future<void>.delayed(const Duration(milliseconds: 1000));
+      }
+      pinch.stop();
+      final int pinchJank = _jankFrames;
+      final int? pinchP50 = FrameStats.instance.percentile(0.5);
+      final int? pinchP95 = FrameStats.instance.percentile(0.95);
+      final int pinchStarted = FrameStats.instance.started;
+      final int pinchFrames = FrameStats.instance.firstFrames;
+      final NativeImageMetrics m = NativeImageMetrics.instance;
+      final String nativeLine = _mode == ProviderMode.native
+          ? ' native(req ${m.requested} done ${m.completed} '
+              'cancel ${m.cancelled} maxInflight ${m.maxInFlight} '
+              'liveBuf ${m.liveBuffers})'
+          : '';
+
+      // Scroll round trip.
+      _resetMetrics();
+      final double max = _scrollController.position.maxScrollExtent;
+      final double target = max < 4000 ? max : 4000;
+      await _scrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 2500),
+        curve: Curves.easeInOut,
+      );
+      await _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 2500),
+        curve: Curves.easeInOut,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      final String result = '[bench] mode=${_mode.name} '
+          'cold24=${cold.elapsedMilliseconds}ms | '
+          'pinch: p50=$pinchP50 p95=$pinchP95 started=$pinchStarted '
+          'frames=$pinchFrames jank=$pinchJank in ${pinch.elapsedMilliseconds}ms'
+          '$nativeLine | '
+          'scroll: p50=${FrameStats.instance.percentile(0.5)} '
+          'p95=${FrameStats.instance.percentile(0.95)} '
+          'started=${FrameStats.instance.started} jank=$_jankFrames | '
+          'total=${total.elapsedMilliseconds}ms';
+      debugPrint(result);
+      setState(() => _benchmarkResult = result);
+    } finally {
+      setState(() => _benchmarkRunning = false);
+    }
   }
 
   @override
@@ -212,6 +350,25 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
       appBar: AppBar(
         title: Text(_album?.name ?? 'Native thumbnails'),
         actions: <Widget>[
+          SegmentedButton<ProviderMode>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            segments: const <ButtonSegment<ProviderMode>>[
+              ButtonSegment<ProviderMode>(
+                value: ProviderMode.native,
+                label: Text('native'),
+              ),
+              ButtonSegment<ProviderMode>(
+                value: ProviderMode.imageProvider,
+                label: Text('image_provider'),
+              ),
+            ],
+            selected: <ProviderMode>{_mode},
+            onSelectionChanged: (Set<ProviderMode> s) => _setMode(s.first),
+          ),
           if (_albums.isNotEmpty)
             PopupMenuButton<AssetPathEntity>(
               icon: const Icon(Icons.photo_album_outlined),
@@ -231,11 +388,15 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
         children: <Widget>[
           Expanded(child: _buildGrid(columns)),
           _MetricsPanel(
+            mode: _mode,
             columns: columns,
             jankFrames: _jankFrames,
             memoryPressureEvents: _memoryPressureEvents,
+            benchmarkRunning: _benchmarkRunning,
+            benchmarkResult: _benchmarkResult,
             onReset: _resetMetrics,
             onMemoryPressure: _forceMemoryPressure,
+            onBenchmark: _runBenchmark,
           ),
         ],
       ),
@@ -262,7 +423,7 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
           return false;
         },
         child: GridView.builder(
-          key: ValueKey<int>(columns),
+          key: ValueKey<String>('${_mode.name}-$columns'),
           controller: _scrollController,
           physics: const NeverScrollableScrollPhysics(),
           // Kept for Flutter < 3.42, where scrollCacheExtent does not exist.
@@ -275,7 +436,7 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
           ),
           itemCount: _assets.length,
           itemBuilder: (BuildContext context, int index) {
-            return _Cell(asset: _assets[index], dense: dense);
+            return _Cell(asset: _assets[index], dense: dense, mode: _mode);
           },
         ),
       ),
@@ -286,19 +447,32 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
 /// `Stack[base 128, main 320]`: the base layer is shared by every column
 /// count, so pinching never re-requests it.
 class _Cell extends StatelessWidget {
-  const _Cell({required this.asset, required this.dense});
+  const _Cell({required this.asset, required this.dense, required this.mode});
 
   final AssetEntity asset;
   final bool dense;
+  final ProviderMode mode;
+
+  ImageProvider _provider(int size) {
+    switch (mode) {
+      case ProviderMode.native:
+        return NativeImageProvider(asset, size: size);
+      case ProviderMode.imageProvider:
+        return AssetEntityImageProvider(
+          asset,
+          isOriginal: false,
+          thumbnailSize: ThumbnailSize.square(size),
+        );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: <Widget>[
-        NativeAssetImage(asset, size: kBaseSize, errorBuilder: _error),
-        if (!dense)
-          NativeAssetImage(asset, size: kMainSize, errorBuilder: _error),
+        _TimedImage(provider: _provider(kBaseSize)),
+        if (!dense) _TimedImage(provider: _provider(kMainSize)),
         if (asset.type == AssetType.video && !dense)
           const Align(
             alignment: Alignment.bottomRight,
@@ -308,6 +482,52 @@ class _Cell extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// `Image` that reports widget-to-first-frame time to [FrameStats].
+class _TimedImage extends StatefulWidget {
+  const _TimedImage({required this.provider});
+
+  final ImageProvider provider;
+
+  @override
+  State<_TimedImage> createState() => _TimedImageState();
+}
+
+class _TimedImageState extends State<_TimedImage> {
+  final Stopwatch _stopwatch = Stopwatch()..start();
+  bool _reported = false;
+
+  @override
+  void initState() {
+    super.initState();
+    FrameStats.instance.started++;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Image(
+      image: widget.provider,
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+      errorBuilder: _error,
+      frameBuilder: (
+        BuildContext context,
+        Widget child,
+        int? frame,
+        bool wasSynchronouslyLoaded,
+      ) {
+        if (frame != null && !_reported) {
+          _reported = true;
+          FrameStats.instance.recordFirstFrame(
+            _stopwatch.elapsedMilliseconds,
+            sync: wasSynchronouslyLoaded,
+          );
+        }
+        return child;
+      },
     );
   }
 
@@ -326,22 +546,31 @@ class _Cell extends StatelessWidget {
 
 class _MetricsPanel extends StatelessWidget {
   const _MetricsPanel({
+    required this.mode,
     required this.columns,
     required this.jankFrames,
     required this.memoryPressureEvents,
+    required this.benchmarkRunning,
+    required this.benchmarkResult,
     required this.onReset,
     required this.onMemoryPressure,
+    required this.onBenchmark,
   });
 
+  final ProviderMode mode;
   final int columns;
   final int jankFrames;
   final int memoryPressureEvents;
+  final bool benchmarkRunning;
+  final String? benchmarkResult;
   final VoidCallback onReset;
   final VoidCallback onMemoryPressure;
+  final VoidCallback onBenchmark;
 
   @override
   Widget build(BuildContext context) {
     final NativeImageMetrics m = NativeImageMetrics.instance;
+    final FrameStats f = FrameStats.instance;
     final TextStyle style = Theme.of(context).textTheme.bodySmall!.copyWith(
       fontFeatures: const <ui.FontFeature>[ui.FontFeature.tabularFigures()],
     );
@@ -361,32 +590,41 @@ class _MetricsPanel extends StatelessWidget {
                 Wrap(
                   spacing: 12,
                   children: <Widget>[
+                    Text(cell('mode', mode.name)),
                     Text(cell('cols', columns)),
-                    Text(cell('req', m.requested)),
-                    Text(cell('done', m.completed)),
-                    Text(cell('cancel', m.cancelled)),
-                    Text(cell('fail', m.failed)),
-                    Text(cell('inflight', m.inFlight)),
-                    Text(cell('maxInflight', m.maxInFlight)),
-                  ],
-                ),
-                Wrap(
-                  spacing: 12,
-                  children: <Widget>[
-                    Text(cell('p50', m.percentile(0.5)?.toString().padLeft(3))),
-                    Text(
-                        cell('p95', m.percentile(0.95)?.toString().padLeft(3))),
+                    Text(cell('widgets', f.started)),
+                    Text(cell('frames', f.firstFrames)),
+                    Text(cell('sync', f.syncHits)),
+                    Text(cell('p50', f.percentile(0.5))),
+                    Text(cell('p95', f.percentile(0.95))),
                     Text(cell('>16ms', jankFrames)),
                     Text(cell('memPressure', memoryPressureEvents)),
-                    Text(
-                      cell('liveBuf', m.liveBuffers),
-                      style: m.liveBuffers == 0
-                          ? null
-                          : style.copyWith(color: Colors.red),
-                    ),
                     Text(cell('cache', imageCache.currentSize)),
                   ],
                 ),
+                if (mode == ProviderMode.native)
+                  Wrap(
+                    spacing: 12,
+                    children: <Widget>[
+                      Text(cell('req', m.requested)),
+                      Text(cell('done', m.completed)),
+                      Text(cell('cancel', m.cancelled)),
+                      Text(cell('fail', m.failed)),
+                      Text(cell('inflight', m.inFlight)),
+                      Text(cell('maxInflight', m.maxInFlight)),
+                      Text(
+                        cell('liveBuf', m.liveBuffers),
+                        style: m.liveBuffers == 0
+                            ? null
+                            : style.copyWith(color: Colors.red),
+                      ),
+                    ],
+                  ),
+                if (benchmarkResult != null)
+                  Text(
+                    benchmarkResult!,
+                    style: style.copyWith(fontSize: 10),
+                  ),
                 Row(
                   children: <Widget>[
                     TextButton(onPressed: onReset, child: const Text('Reset')),
@@ -395,10 +633,8 @@ class _MetricsPanel extends StatelessWidget {
                       child: const Text('Memory pressure'),
                     ),
                     TextButton(
-                      onPressed: () => debugPrint(
-                        'latencies=${m.latenciesMs}',
-                      ),
-                      child: const Text('Dump'),
+                      onPressed: benchmarkRunning ? null : onBenchmark,
+                      child: Text(benchmarkRunning ? 'Running…' : 'Benchmark'),
                     ),
                   ],
                 ),
