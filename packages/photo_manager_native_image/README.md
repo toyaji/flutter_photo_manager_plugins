@@ -176,6 +176,10 @@ On Android the policy is ignored; MediaStore assets are always local.
 - CocoaPods and Swift Package Manager are both supported on iOS
   (`darwin/` podspec and `Package.swift`).
 
+`NativeAssetImage` defaults to `fit: BoxFit.cover`, `gaplessPlayback: true`,
+and `filterQuality: FilterQuality.low`, the settings a thumbnail grid wants;
+pass your own for other layouts.
+
 ## Not in scope
 
 Disk caching, prefetching, cache partitioning, resolution tiers, and
