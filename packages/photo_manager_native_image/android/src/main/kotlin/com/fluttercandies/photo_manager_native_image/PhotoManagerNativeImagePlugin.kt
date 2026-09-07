@@ -42,9 +42,16 @@ class PhotoManagerNativeImagePlugin : FlutterPlugin, NativeImageHostApi {
         }
         try {
             executor.execute {
-                val result = produce(state, assetId, width.toInt(), height.toInt(), isVideo)
-                registry.remove(requestId)
-                state.finish(result)
+                try {
+                    val result = produce(state, assetId, width.toInt(), height.toInt(), isVideo)
+                    registry.remove(requestId)
+                    state.finish(result)
+                } catch (t: Throwable) {
+                    // An uncaught error on a pool thread would kill the
+                    // process; a request must still get its one reply.
+                    registry.remove(requestId)
+                    state.finish(Result.failure(NativeImageError("decode_failed", t.toString())))
+                }
             }
         } catch (_: Exception) {
             registry.remove(requestId)

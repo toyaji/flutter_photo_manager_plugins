@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:photo_manager/photo_manager.dart';
@@ -43,6 +44,8 @@ class _GalleryPageState extends State<GalleryPage>
   String? _errorText;
   int _columnIndex = 2;
   bool _loadingMore = false;
+  final ScrollController _scrollController = ScrollController();
+  Drag? _drag;
 
   // Instrumentation.
   int _jankFrames = 0;
@@ -75,6 +78,7 @@ class _GalleryPageState extends State<GalleryPage>
     SchedulerBinding.instance.removeTimingsCallback(_timingsCallback);
     NativeImageMetrics.instance.removeListener(_onMetrics);
     WidgetsBinding.instance.removeObserver(this);
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -143,10 +147,29 @@ class _GalleryPageState extends State<GalleryPage>
     }
   }
 
-  void _onScaleStart(ScaleStartDetails details) => _pinchBase = 1;
+  // One recognizer owns the grid: a single finger scrolls through the
+  // ScrollPosition's own Drag (fling and overscroll included), two fingers
+  // pinch. The grid's own drag recognizer would otherwise win the arena
+  // before the second finger lands.
+  void _onScaleStart(ScaleStartDetails details) {
+    _pinchBase = 1;
+    if (details.pointerCount == 1 && _scrollController.hasClients) {
+      _drag = _scrollController.position.drag(
+        DragStartDetails(globalPosition: details.focalPoint),
+        () => _drag = null,
+      );
+    }
+  }
 
   void _onScaleUpdate(ScaleUpdateDetails details) {
     if (details.pointerCount < 2) {
+      _drag?.update(
+        DragUpdateDetails(
+          globalPosition: details.focalPoint,
+          delta: Offset(0, details.focalPointDelta.dy),
+          primaryDelta: details.focalPointDelta.dy,
+        ),
+      );
       return;
     }
     final double ratio = details.scale / _pinchBase;
@@ -157,6 +180,16 @@ class _GalleryPageState extends State<GalleryPage>
       _pinchBase = details.scale;
       setState(() => _columnIndex++);
     }
+  }
+
+  void _onScaleEnd(ScaleEndDetails details) {
+    _drag?.end(
+      DragEndDetails(
+        velocity: details.velocity,
+        primaryVelocity: details.velocity.pixelsPerSecond.dy,
+      ),
+    );
+    _drag = null;
   }
 
   void _forceMemoryPressure() {
@@ -220,6 +253,7 @@ class _GalleryPageState extends State<GalleryPage>
     return GestureDetector(
       onScaleStart: _onScaleStart,
       onScaleUpdate: _onScaleUpdate,
+      onScaleEnd: _onScaleEnd,
       child: NotificationListener<ScrollNotification>(
         onNotification: (ScrollNotification notification) {
           if (notification.metrics.extentAfter < 600) {
@@ -229,6 +263,8 @@ class _GalleryPageState extends State<GalleryPage>
         },
         child: GridView.builder(
           key: ValueKey<int>(columns),
+          controller: _scrollController,
+          physics: const NeverScrollableScrollPhysics(),
           // Kept for Flutter < 3.42, where scrollCacheExtent does not exist.
           // ignore: deprecated_member_use
           cacheExtent: 600,

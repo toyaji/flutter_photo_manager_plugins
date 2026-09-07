@@ -2,6 +2,8 @@
 // Use of this source code is governed by an Apache license that can be found
 // in the LICENSE file.
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 /// Counters for the native pipeline, meant for the example app and for
@@ -36,6 +38,21 @@ class NativeImageMetrics extends ChangeNotifier {
   /// Request-to-frame latencies in milliseconds since [reset].
   final List<int> latenciesMs = <int>[];
 
+  bool _notifyScheduled = false;
+
+  /// Counters change inside `ImageProvider.loadImage`, i.e. during build, so
+  /// listeners are told once per turn of the event loop instead.
+  void _scheduleNotify() {
+    if (_notifyScheduled) {
+      return;
+    }
+    _notifyScheduled = true;
+    scheduleMicrotask(() {
+      _notifyScheduled = false;
+      notifyListeners();
+    });
+  }
+
   /// Clears every counter.
   void reset() {
     requested = 0;
@@ -65,7 +82,7 @@ class NativeImageMetrics extends ChangeNotifier {
     if (inFlight > maxInFlight) {
       maxInFlight = inFlight;
     }
-    notifyListeners();
+    _scheduleNotify();
   }
 
   void _onAnswered() {
@@ -78,23 +95,23 @@ class NativeImageMetrics extends ChangeNotifier {
 
   void _onBufferFreed() {
     liveBuffers--;
-    notifyListeners();
+    _scheduleNotify();
   }
 
   void _onCompleted(Duration latency) {
     completed++;
     latenciesMs.add(latency.inMilliseconds);
-    notifyListeners();
+    _scheduleNotify();
   }
 
   void _onCancelled() {
     cancelled++;
-    notifyListeners();
+    _scheduleNotify();
   }
 
   void _onFailed() {
     failed++;
-    notifyListeners();
+    _scheduleNotify();
   }
 }
 
