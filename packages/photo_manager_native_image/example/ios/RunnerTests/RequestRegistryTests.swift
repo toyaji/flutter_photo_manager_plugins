@@ -63,6 +63,79 @@ final class RequestRegistryTests: XCTestCase {
         XCTAssertEqual(registry.pendingCount, 0)
     }
 
+    func testBufferProducedAfterDetachIsFreed() {
+        let registry = NativeImageRequestRegistry()
+        var replies: [NativeImageReply?] = []
+        let s = state(11) { if case .success(let r) = $0 { replies.append(r) } }
+        XCTAssertTrue(registry.register(s))
+        // Engine detach settles the request before the worker hands back its buffer.
+        registry.cancelAll().forEach { $0.finish(.success(nil)) }
+        let pointer = malloc(4)!
+        var freed: [UnsafeMutableRawPointer] = []
+        let reply: NativeImageReply = ["pointer": Int64(Int(bitPattern: pointer)), "width": 1, "height": 1, "rowBytes": 4]
+        let accepted = s.deliver(.success(reply)) { freed.append($0) }
+        XCTAssertFalse(accepted)
+        XCTAssertEqual(freed, [pointer])
+        XCTAssertEqual(replies.count, 1)
+        XCTAssertNil(replies[0])
+        free(pointer)
+    }
+
+    func testAcceptedBufferIsNotFreed() {
+        let s = state(12)
+        var freed = 0
+        XCTAssertTrue(s.deliver(.success(["pointer": 0x1000])) { _ in freed += 1 })
+        XCTAssertEqual(freed, 0)
+    }
+
+    func testRejectedErrorOrNullFreesNothing() {
+        let s = state(13)
+        s.finish(.success(nil))
+        var freed = 0
+        XCTAssertFalse(s.deliver(.failure(NativeImageError(code: "decode_failed", message: nil, details: nil))) { _ in freed += 1 })
+        XCTAssertFalse(s.deliver(.success(nil)) { _ in freed += 1 })
+        XCTAssertEqual(freed, 0)
+    }
+
+    func testCancelRunsTheHookOnce() {
+        let registry = NativeImageRequestRegistry()
+        let s = state(21)
+        XCTAssertTrue(registry.register(s))
+        var calls = 0
+        XCTAssertTrue(s.setCancelHook { calls += 1 })
+        registry.cancel(requestId: 21)
+        registry.cancel(requestId: 21)
+        XCTAssertEqual(calls, 1)
+        XCTAssertTrue(s.isCancelled)
+    }
+
+    func testHookIsRejectedAfterCancel() {
+        let s = state(22)
+        s.markCancelled()
+        var calls = 0
+        XCTAssertFalse(s.setCancelHook { calls += 1 })
+        XCTAssertEqual(calls, 0)
+    }
+
+    func testRemovedHookIsNotCalled() {
+        let s = state(23)
+        var calls = 0
+        XCTAssertTrue(s.setCancelHook { calls += 1 })
+        s.setCancelHook(nil)
+        s.markCancelled()
+        XCTAssertEqual(calls, 0)
+    }
+
+    func testEngineDetachRunsPendingHooks() {
+        let registry = NativeImageRequestRegistry()
+        let s = state(24)
+        XCTAssertTrue(registry.register(s))
+        var calls = 0
+        s.setCancelHook { calls += 1 }
+        _ = registry.cancelAll()
+        XCTAssertEqual(calls, 1)
+    }
+
     func testConcurrentFinishDeliversOnce() {
         let counter = NSLock()
         var replies = 0

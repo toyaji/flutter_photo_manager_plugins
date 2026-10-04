@@ -48,7 +48,7 @@ final class NativeImageLoader {
             }
             let result = self.produce(state: state, assetId: assetId, targetSize: targetSize, allowNetwork: allowNetwork)
             self.registry.remove(requestId: requestId)
-            state.finish(result)
+            state.deliver(result, free: { Foundation.free($0) })
         }
     }
 
@@ -75,7 +75,7 @@ final class NativeImageLoader {
         }
         if state.isCancelled { return .success(nil) }
 
-        var outcome = requestImage(asset: asset, targetSize: targetSize, allowNetwork: allowNetwork)
+        var outcome = requestImage(asset: asset, targetSize: targetSize, allowNetwork: allowNetwork, state: state)
         if case .failure(let error) = outcome, Self.isConnectionInvalidated(error) {
             // The photo daemon dropped the XPC connection; a cached PHAsset
             // stays dead, so fetch it again and retry once.
@@ -83,8 +83,10 @@ final class NativeImageLoader {
             guard let fresh = fetchAsset(assetId) else {
                 return .failure(NativeImageError(code: "not_found", message: "No asset with id \(assetId).", details: nil))
             }
-            outcome = requestImage(asset: fresh, targetSize: targetSize, allowNetwork: allowNetwork)
+            outcome = requestImage(asset: fresh, targetSize: targetSize, allowNetwork: allowNetwork, state: state)
         }
+        // A cancelled download ends without an image; that is a cancel, not an error.
+        if state.isCancelled { return .success(nil) }
 
         let image: UIImage
         switch outcome {
@@ -118,34 +120,73 @@ final class NativeImageLoader {
         return asset
     }
 
-    private func requestImage(asset: PHAsset, targetSize: CGSize, allowNetwork: Bool) -> Result<UIImage, Error> {
-        let options = PHImageRequestOptions()
-        options.deliveryMode = .highQualityFormat
-        options.resizeMode = .fast
-        options.isSynchronous = true
-        options.version = .current
-        options.isNetworkAccessAllowed = allowNetwork
-
-        var result: Result<UIImage, Error> = .failure(
+    /// Collects the single result of a PhotoKit request.
+    private final class ResultBox {
+        private let lock = NSLock()
+        private var stored: Result<UIImage, Error> = .failure(
             NativeImageError(code: "decode_failed", message: "PhotoKit returned no image.", details: nil))
-        PHImageManager.default().requestImage(
-            for: asset, targetSize: targetSize, contentMode: .aspectFill, options: options
-        ) { image, info in
+
+        var result: Result<UIImage, Error> {
+            lock.lock(); defer { lock.unlock() }
+            return stored
+        }
+
+        func store(_ image: UIImage?, _ info: [AnyHashable: Any]?) {
+            lock.lock(); defer { lock.unlock() }
             if let image = image {
-                result = .success(image)
+                stored = .success(image)
                 return
             }
             let error = info?[PHImageErrorKey] as? NSError
             let inCloud = (info?[PHImageResultIsInCloudKey] as? NSNumber)?.boolValue ?? false
-            if inCloud || Self.isNetworkRequired(error) {
-                result = .failure(NativeImageError(
+            if inCloud || NativeImageLoader.isNetworkRequired(error) {
+                stored = .failure(NativeImageError(
                     code: "icloud_not_downloaded",
                     message: "The original is in iCloud; retry with allowNetwork.", details: nil))
             } else if let error = error {
-                result = .failure(error)
+                stored = .failure(error)
             }
         }
-        return result
+    }
+
+    /// Local requests stay synchronous: they finish in milliseconds and cancelling
+    /// them gains nothing measurable. Network requests are asynchronous so a
+    /// cancel stops the iCloud download and frees the slot at once.
+    private func requestImage(
+        asset: PHAsset, targetSize: CGSize, allowNetwork: Bool, state: NativeImageRequestState
+    ) -> Result<UIImage, Error> {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .fast
+        options.version = .current
+        options.isNetworkAccessAllowed = allowNetwork
+        let box = ResultBox()
+
+        guard allowNetwork else {
+            options.isSynchronous = true
+            PHImageManager.default().requestImage(
+                for: asset, targetSize: targetSize, contentMode: .aspectFill, options: options
+            ) { image, info in box.store(image, info) }
+            return box.result
+        }
+
+        options.isSynchronous = false
+        let finished = DispatchSemaphore(value: 0)
+        let id = PHImageManager.default().requestImage(
+            for: asset, targetSize: targetSize, contentMode: .aspectFill, options: options
+        ) { image, info in
+            box.store(image, info)
+            finished.signal()
+        }
+        // A cancelled request may never call its handler, so the hook wakes this worker itself.
+        let cancel = {
+            finished.signal()
+            PHImageManager.default().cancelImageRequest(id)
+        }
+        if !state.setCancelHook(cancel) { cancel() }
+        finished.wait()
+        state.setCancelHook(nil)
+        return box.result
     }
 
     static func isConnectionInvalidated(_ error: Error) -> Bool {

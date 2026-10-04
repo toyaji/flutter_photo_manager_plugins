@@ -86,6 +86,17 @@ from `ImageCache`. On the platform, a request that has not reached step 5 is
 dropped and replies `null`; one that has already allocated still replies with
 the buffer, which Dart frees and discards.
 
+What a cancel stops depends on where the request is:
+
+| Request state | On cancel |
+|---|---|
+| Waiting in the queue | Dropped; no work is done |
+| Decoding a local asset | Runs to the end (milliseconds); the result is discarded |
+| Downloading from iCloud (iOS, network attempt) | The download is cancelled and the slot freed immediately |
+
+Local decodes are not interrupted on purpose: measured on devices, stopping them
+saved little worker time and did not change queue wait or decode time.
+
 Two situations look like "the last listener left" but are not:
 
 - `imageCache.clear()` (memory pressure) detaches only the cache's listener.

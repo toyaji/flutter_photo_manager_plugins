@@ -6,7 +6,8 @@
   trip.
 - iOS: `PHImageManager.requestImage` on a worker queue, `vImage` downscale,
   XPC reconnect retry, `icloud_not_downloaded` classification, low-priority
-  queue for network attempts.
+  queue for network attempts; cancelling a network attempt stops its iCloud
+  download.
 - `NetworkPolicy` (`fallback` by default): local first, then one network
   attempt for iCloud-only assets; `never` and `always` for apps that want to
   decide.

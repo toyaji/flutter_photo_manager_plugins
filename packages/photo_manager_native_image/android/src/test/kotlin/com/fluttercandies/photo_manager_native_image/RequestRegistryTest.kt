@@ -73,6 +73,42 @@ class RequestRegistryTest {
     }
 
     @Test
+    fun bufferProducedAfterDetachIsFreed() {
+        val registry = RequestRegistry()
+        val replies = mutableListOf<Result<NativeImageReply?>>()
+        val s = state(11) { replies.add(it) }
+        registry.register(s)
+        // Engine detach settles the request before the worker hands back its buffer.
+        registry.cancelAll().forEach { it.finish(Result.success(null)) }
+        val freed = mutableListOf<Long>()
+        val accepted = s.deliver(
+            Result.success(mapOf("pointer" to 0xABCL, "width" to 1L, "height" to 1L, "rowBytes" to 4L)),
+        ) { freed.add(it) }
+        assertFalse(accepted)
+        assertEquals(listOf(0xABCL), freed)
+        assertEquals(1, replies.size)
+        assertEquals(null, replies.single().getOrNull())
+    }
+
+    @Test
+    fun acceptedBufferIsNotFreed() {
+        val s = state(12)
+        val freed = mutableListOf<Long>()
+        assertTrue(s.deliver(Result.success(mapOf("pointer" to 0xDEFL))) { freed.add(it) })
+        assertTrue(freed.isEmpty())
+    }
+
+    @Test
+    fun rejectedErrorOrNullFreesNothing() {
+        val s = state(13)
+        s.finish(Result.success(null))
+        val freed = mutableListOf<Long>()
+        assertFalse(s.deliver(Result.failure(NativeImageError("decode_failed"))) { freed.add(it) })
+        assertFalse(s.deliver(Result.success(null)) { freed.add(it) })
+        assertTrue(freed.isEmpty())
+    }
+
+    @Test
     fun concurrentFinishDeliversOnce() {
         val replies = AtomicInteger()
         val s = state(5) { replies.incrementAndGet() }

@@ -26,6 +26,11 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Instrumented tests read and write shared media; grant runtime permissions at install.
+    installation {
+        installOptions.add("-g")
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

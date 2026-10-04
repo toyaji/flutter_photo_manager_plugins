@@ -45,7 +45,7 @@ class PhotoManagerNativeImagePlugin : FlutterPlugin, NativeImageHostApi {
                 try {
                     val result = produce(state, assetId, width.toInt(), height.toInt(), isVideo)
                     registry.remove(requestId)
-                    state.finish(result)
+                    state.deliver(result, NativeBuffer::free)
                 } catch (t: Throwable) {
                     // An uncaught error on a pool thread would kill the
                     // process; a request must still get its one reply.

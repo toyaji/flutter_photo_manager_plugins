@@ -26,6 +26,16 @@ class RequestState(
         isCancelled = true
     }
 
+    /**
+     * Delivers a worker's result. A buffer only becomes Dart's once the reply is
+     * accepted; if the request was already settled (engine detach), it is freed here.
+     */
+    fun deliver(result: Result<NativeImageReply?>, free: (Long) -> Unit): Boolean {
+        if (finish(result)) return true
+        result.getOrNull()?.get("pointer")?.let(free)
+        return false
+    }
+
     /** Returns `true` if this call delivered the reply. */
     fun finish(result: Result<NativeImageReply?>): Boolean {
         val callback = synchronized(lock) {

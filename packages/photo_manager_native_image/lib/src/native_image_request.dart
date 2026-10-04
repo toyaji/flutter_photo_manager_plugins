@@ -153,7 +153,7 @@ class NativeImageRequest {
       final bool last = i == attempts.length - 1;
       try {
         final ui.FrameInfo? frame = await _attempt(allowNetwork: attempts[i]);
-        return _settle(() {
+        return _settle<ui.FrameInfo?>(() {
           if (frame != null) {
             _metrics.markCompleted(stopwatch.elapsed);
           }

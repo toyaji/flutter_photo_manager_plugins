@@ -76,7 +76,7 @@ class NativeImageDecoder(private val context: Context) {
             }
         }
         if (bitmap == null && !isVideo) {
-            bitmap = decodeWithBitmapFactory(uri, targetShorter)
+            bitmap = SampledBitmapDecoder.decode(resolver, uri, targetShorter)
         }
         if (bitmap == null) {
             throw NativeImageException("decode_failed", "No thumbnail for $uri")
@@ -87,18 +87,6 @@ class NativeImageDecoder(private val context: Context) {
         val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         if (rotated !== bitmap) bitmap.recycle()
         return rotated
-    }
-
-    private fun decodeWithBitmapFactory(uri: Uri, targetShorter: Int): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-            ?: throw FileNotFoundException(uri.toString())
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        val options = BitmapFactory.Options().apply {
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-            inSampleSize = ThumbnailMath.sampleSize(bounds.outWidth, bounds.outHeight, targetShorter)
-        }
-        return resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
     }
 
     /** `(width, height, rotationDegrees)` of the source as MediaStore reports it. */
