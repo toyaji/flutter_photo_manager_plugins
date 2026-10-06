@@ -7,6 +7,9 @@ import 'package:flutter/scheduler.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_manager_image_provider/photo_manager_image_provider.dart';
 import 'package:photo_manager_native_image/photo_manager_native_image.dart';
+// The instrumentation panel reads package internals that apps do not need.
+// ignore: implementation_imports
+import 'package:photo_manager_native_image/src/native_image_metrics.dart';
 
 void main() => runApp(const ExampleApp());
 
@@ -88,7 +91,6 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
   int _columnIndex = 2;
   bool _loadingMore = false;
   ProviderMode _mode = ProviderMode.native;
-  NetworkPolicy _network = NetworkPolicy.fallback;
   final ScrollController _scrollController = ScrollController();
   Drag? _drag;
 
@@ -259,13 +261,6 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
     setState(() => _mode = mode);
   }
 
-  void _setNetwork(NetworkPolicy network) {
-    imageCache.clear();
-    imageCache.clearLiveImages();
-    _resetMetrics();
-    setState(() => _network = network);
-  }
-
   /// Same scenario for every provider and device: cold fill, ten column
   /// changes, one scroll round trip. Prints a summary line to the console.
   Future<void> _runBenchmark() async {
@@ -377,20 +372,6 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
             selected: <ProviderMode>{_mode},
             onSelectionChanged: (Set<ProviderMode> s) => _setMode(s.first),
           ),
-          PopupMenuButton<NetworkPolicy>(
-            icon: const Icon(Icons.cloud_outlined),
-            tooltip: 'iCloud policy: ${_network.name}',
-            onSelected: _setNetwork,
-            itemBuilder: (BuildContext context) =>
-                <PopupMenuEntry<NetworkPolicy>>[
-              for (final NetworkPolicy policy in NetworkPolicy.values)
-                CheckedPopupMenuItem<NetworkPolicy>(
-                  value: policy,
-                  checked: policy == _network,
-                  child: Text(policy.name),
-                ),
-            ],
-          ),
           if (_albums.isNotEmpty)
             PopupMenuButton<AssetPathEntity>(
               icon: const Icon(Icons.photo_album_outlined),
@@ -411,7 +392,6 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
           Expanded(child: _buildGrid(columns)),
           _MetricsPanel(
             mode: _mode,
-            network: _network,
             columns: columns,
             jankFrames: _jankFrames,
             memoryPressureEvents: _memoryPressureEvents,
@@ -446,7 +426,7 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
           return false;
         },
         child: GridView.builder(
-          key: ValueKey<String>('${_mode.name}-${_network.name}-$columns'),
+          key: ValueKey<String>('${_mode.name}-$columns'),
           controller: _scrollController,
           physics: const NeverScrollableScrollPhysics(),
           // Kept for Flutter < 3.42, where scrollCacheExtent does not exist.
@@ -459,12 +439,7 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
           ),
           itemCount: _assets.length,
           itemBuilder: (BuildContext context, int index) {
-            return _Cell(
-              asset: _assets[index],
-              dense: dense,
-              mode: _mode,
-              network: _network,
-            );
+            return _Cell(asset: _assets[index], dense: dense, mode: _mode);
           },
         ),
       ),
@@ -475,22 +450,16 @@ class _GalleryPageState extends State<GalleryPage> with WidgetsBindingObserver {
 /// `Stack[base 128, main 320]`: the base layer is shared by every column
 /// count, so pinching never re-requests it.
 class _Cell extends StatelessWidget {
-  const _Cell({
-    required this.asset,
-    required this.dense,
-    required this.mode,
-    required this.network,
-  });
+  const _Cell({required this.asset, required this.dense, required this.mode});
 
   final AssetEntity asset;
   final bool dense;
   final ProviderMode mode;
-  final NetworkPolicy network;
 
   ImageProvider _provider(int size) {
     switch (mode) {
       case ProviderMode.native:
-        return NativeImageProvider(asset, size: size, network: network);
+        return NativeImageProvider(asset, size: size);
       case ProviderMode.imageProvider:
         return AssetEntityImageProvider(
           asset,
@@ -581,7 +550,6 @@ class _TimedImageState extends State<_TimedImage> {
 class _MetricsPanel extends StatelessWidget {
   const _MetricsPanel({
     required this.mode,
-    required this.network,
     required this.columns,
     required this.jankFrames,
     required this.memoryPressureEvents,
@@ -593,7 +561,6 @@ class _MetricsPanel extends StatelessWidget {
   });
 
   final ProviderMode mode;
-  final NetworkPolicy network;
   final int columns;
   final int jankFrames;
   final int memoryPressureEvents;
@@ -627,7 +594,6 @@ class _MetricsPanel extends StatelessWidget {
                   spacing: 12,
                   children: <Widget>[
                     Text(cell('mode', mode.name)),
-                    Text(cell('net', network.name)),
                     Text(cell('cols', columns)),
                     Text(cell('widgets', f.started)),
                     Text(cell('frames', f.firstFrames)),

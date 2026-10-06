@@ -95,7 +95,6 @@ final class NativeImageLoader {
         case .success(let value):
             image = value
         }
-        if state.isCancelled { return .success(nil) }
 
         // No cancel checks past this point: the buffer is Dart's to free.
         guard let cgImage = PixelBufferFactory.uprightCGImage(image) else {
@@ -142,7 +141,7 @@ final class NativeImageLoader {
             if inCloud || NativeImageLoader.isNetworkRequired(error) {
                 stored = .failure(NativeImageError(
                     code: "icloud_not_downloaded",
-                    message: "The original is in iCloud; retry with allowNetwork.", details: nil))
+                    message: "The asset is in iCloud and was not downloaded.", details: nil))
             } else if let error = error {
                 stored = .failure(error)
             }

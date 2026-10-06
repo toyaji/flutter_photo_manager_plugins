@@ -3,6 +3,7 @@ package com.fluttercandies.photo_manager_native_image
 import android.content.ContentResolver
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ColorSpace
 import android.net.Uri
 import java.io.FileNotFoundException
 
@@ -16,6 +17,7 @@ object SampledBitmapDecoder {
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
         val options = BitmapFactory.Options().apply {
             inPreferredConfig = Bitmap.Config.ARGB_8888
+            inPreferredColorSpace = ColorSpace.get(ColorSpace.Named.SRGB)
             inSampleSize = ThumbnailMath.sampleSize(bounds.outWidth, bounds.outHeight, targetShorter)
         }
         return resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }

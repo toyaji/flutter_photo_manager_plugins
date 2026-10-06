@@ -5,6 +5,8 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:photo_manager_native_image/photo_manager_native_image.dart';
+import 'package:photo_manager_native_image/src/native_image_channel.dart';
+import 'package:photo_manager_native_image/src/native_image_request.dart';
 
 import 'fake_channel.dart';
 
@@ -17,23 +19,21 @@ void main() {
   setUp(() {
     channel = FakeChannel();
     frees = 0;
+    NativeImageChannel.instance = channel;
+    debugNativeBufferFree = (Pointer<Uint8> p) {
+      frees++;
+      malloc.free(p);
+    };
     PaintingBinding.instance.imageCache.clear();
   });
 
-  NativeImageProvider provider({
-    String id = 'a',
-    NetworkPolicy network = NetworkPolicy.never,
-  }) {
-    return NativeImageProvider(
-      entity(id: id),
-      size: 32,
-      network: network,
-      channel: channel,
-      debugFree: (Pointer<Uint8> p) {
-        frees++;
-        malloc.free(p);
-      },
-    );
+  tearDown(() {
+    NativeImageChannel.instance = const PigeonNativeImageChannel();
+    debugNativeBufferFree = null;
+  });
+
+  NativeImageProvider provider({String id = 'a'}) {
+    return NativeImageProvider(entity(id: id), size: 32);
   }
 
   test('removing the widget listener cancels and evicts the pending key',
@@ -86,6 +86,10 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     channel.fail(channel.requested.single, 'icloud_not_downloaded');
     await pumpEventQueue();
+    // Offline: the network attempt fails as well.
+    channel.fail(channel.requested.last, 'icloud_not_downloaded');
+    await pumpEventQueue();
+    expect(channel.requested, hasLength(2));
     expect(
       error,
       isA<NativeImageException>().having(
@@ -98,10 +102,8 @@ void main() {
     stream.removeListener(widget);
   });
 
-  test('fallback: an icloud miss is retried and the frame fills the same key',
-      () async {
-    final NativeImageProvider p =
-        provider(id: 'e', network: NetworkPolicy.fallback);
+  test('an icloud miss is retried and the frame fills the same key', () async {
+    final NativeImageProvider p = provider(id: 'e');
     final ImageStream stream = p.resolve(ImageConfiguration.empty);
     ImageInfo? received;
     Object? error;

@@ -1,6 +1,7 @@
 ## 0.1.0
 
-- `NativeImageProvider`, `NativeAssetImage`, `NativeImageException`: load a
+- `NativeImageProvider`, `NativeAssetImage`, `NativeImageException` /
+  `NativeImageErrorCode` (the whole public API): load a
   `photo_manager` `AssetEntity` thumbnail as native RGBA pixels handed to
   Flutter through `dart:ffi` and `ImageDescriptor.raw`, with no JPEG round
   trip.
@@ -8,11 +9,12 @@
   XPC reconnect retry, `icloud_not_downloaded` classification, low-priority
   queue for network attempts; cancelling a network attempt stops its iCloud
   download.
-- `NetworkPolicy` (`fallback` by default): local first, then one network
-  attempt for iCloud-only assets; `never` and `always` for apps that want to
-  decide.
-- Android: `ContentResolver.loadThumbnail` / `ImageDecoder` on API 29+,
+- iCloud-only assets: local first, then one network attempt only when
+  PhotoKit needs it. Nothing to configure.
+- Android: MediaStore system thumbnail or the original through `ImageDecoder`
+  on API 29+, decoded to the requested size in sRGB,
   `MediaStore.*.Thumbnails` and `BitmapFactory` with orientation correction on
   API 26–28, JNI `malloc` buffers.
+- Decoded pixels capped at `size² × 4`, so panoramas stay bounded.
 - Cancellation that recognises the `ImageCache` listener, so scrolled-away
   cells stop their native work without false cancels on `imageCache.clear()`.

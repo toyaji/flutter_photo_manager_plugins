@@ -9,26 +9,22 @@ import 'package:photo_manager/photo_manager.dart';
 import 'native_image_channel.dart';
 import 'native_image_request.dart';
 import 'native_image_stream_completer.dart';
-import 'network_policy.dart';
 
 /// Loads an [AssetEntity] thumbnail decoded natively to RGBA.
 ///
 /// [size] is the pixel length of the shorter side (aspect fill); which sizes an
 /// app uses, and how many, is the app's policy. The cache key is
-/// `(entity.id, modified date, size, isVideo)`, so an edited asset reloads and
-/// [network] does not split the cache.
+/// `(entity.id, modified date, size, isVideo)`, so an edited asset reloads.
+///
+/// iOS: an asset that is only in iCloud is tried locally first; if PhotoKit
+/// needs the network for this size, one download follows on a low-priority
+/// queue.
 class NativeImageProvider extends ImageProvider<NativeImageProvider> {
   /// Creates a provider for [entity] at [size] pixels.
   NativeImageProvider(
     this.entity, {
     required this.size,
-    this.network = NetworkPolicy.fallback,
-    this.scale = 1.0,
-    NativeImageChannel? channel,
-    NativeBufferFree? debugFree,
-  })  : assert(size > 0),
-        _channel = channel,
-        _debugFree = debugFree;
+  }) : assert(size > 0);
 
   /// The asset to load.
   final AssetEntity entity;
@@ -36,23 +32,10 @@ class NativeImageProvider extends ImageProvider<NativeImageProvider> {
   /// Pixel length of the shorter side of the decoded image.
   final int size;
 
-  /// iOS: whether and when PhotoKit may download from iCloud. Network
-  /// attempts run on a low-priority queue so they never block on-screen
-  /// thumbnails.
-  final NetworkPolicy network;
-
-  /// Scale reported in the resulting [ImageInfo].
-  final double scale;
-
-  final NativeImageChannel? _channel;
-  final NativeBufferFree? _debugFree;
-
-  /// The date part of the cache key.
-  int get modifiedDateSecond =>
+  int get _modifiedDateSecond =>
       entity.modifiedDateSecond ?? entity.createDateSecond ?? 0;
 
-  /// Whether the asset is a video.
-  bool get isVideo => entity.type == AssetType.video;
+  bool get _isVideo => entity.type == AssetType.video;
 
   @override
   Future<NativeImageProvider> obtainKey(ImageConfiguration configuration) {
@@ -65,12 +48,10 @@ class NativeImageProvider extends ImageProvider<NativeImageProvider> {
     ImageDecoderCallback decode,
   ) {
     final NativeImageRequest request = NativeImageRequest(
-      channel: _channel ?? NativeImageChannel.instance,
+      channel: NativeImageChannel.instance,
       assetId: entity.id,
       size: size,
-      isVideo: isVideo,
-      policy: network,
-      free: _debugFree,
+      isVideo: _isVideo,
     );
     return NativeImageStreamCompleter(
       load: request.load,
@@ -81,7 +62,6 @@ class NativeImageProvider extends ImageProvider<NativeImageProvider> {
       // Like NetworkImage: a failed key must not be served from the pending
       // cache, so the next resolve of the same asset starts a new load.
       onFailure: () => PaintingBinding.instance.imageCache.evict(key),
-      scale: scale,
       debugLabel: '${entity.id}@$size',
     );
   }
@@ -93,13 +73,14 @@ class NativeImageProvider extends ImageProvider<NativeImageProvider> {
     }
     return other is NativeImageProvider &&
         other.entity.id == entity.id &&
-        other.modifiedDateSecond == modifiedDateSecond &&
+        other._modifiedDateSecond == _modifiedDateSecond &&
         other.size == size &&
-        other.isVideo == isVideo;
+        other._isVideo == _isVideo;
   }
 
   @override
-  int get hashCode => Object.hash(entity.id, modifiedDateSecond, size, isVideo);
+  int get hashCode =>
+      Object.hash(entity.id, _modifiedDateSecond, size, _isVideo);
 
   @override
   String toString() =>

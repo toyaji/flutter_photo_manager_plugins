@@ -20,16 +20,12 @@ class NativeImageStreamCompleter extends ImageStreamCompleter
     required Future<ui.FrameInfo?> Function() load,
     required VoidCallback onCancel,
     required VoidCallback onFailure,
-    required this.scale,
     String? debugLabel,
   })  : _onCancel = onCancel,
         _onFailure = onFailure {
     this.debugLabel = debugLabel;
     _run(load);
   }
-
-  /// Device pixel ratio the frame was decoded for.
-  final double scale;
 
   final VoidCallback _onCancel;
   final VoidCallback _onFailure;
@@ -74,7 +70,7 @@ class NativeImageStreamCompleter extends ImageStreamCompleter
       return;
     }
     setImage(
-      ImageInfo(image: frame.image, scale: scale, debugLabel: debugLabel),
+      ImageInfo(image: frame.image, debugLabel: debugLabel),
     );
   }
 

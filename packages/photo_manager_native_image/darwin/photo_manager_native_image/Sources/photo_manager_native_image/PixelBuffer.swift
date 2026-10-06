@@ -45,20 +45,28 @@ enum PixelBufferFactory {
             renderingIntent: .defaultIntent)
     }
 
+    /// Decoded pixels are capped at this many target squares, so panoramas stay bounded.
+    static let maxPixelsInTargetSquares: CGFloat = 4
+
     /// Size that scales `image` so its shorter side equals the target's
-    /// shorter side, never upscaling.
+    /// shorter side, then shrinks further until the area is at most
+    /// `maxPixelsInTargetSquares` target squares. Never upscales.
     static func scaledSize(for image: CGSize, target: CGSize) -> CGSize? {
+        guard image.width > 0, image.height > 0 else { return nil }
         let shorter = min(image.width, image.height)
         let targetShorter = min(target.width, target.height)
-        guard shorter > targetShorter, shorter > 0 else { return nil }
-        let scale = targetShorter / shorter
+        var scale = shorter > targetShorter ? targetShorter / shorter : 1
+        let maxPixels = maxPixelsInTargetSquares * targetShorter * targetShorter
+        let pixels = image.width * scale * image.height * scale
+        if pixels > maxPixels { scale *= (maxPixels / pixels).squareRoot() }
+        guard scale < 1 else { return nil }
         return CGSize(
             width: max(1, (image.width * scale).rounded()),
             height: max(1, (image.height * scale).rounded()))
     }
 
     /// Converts `cgImage` to RGBA and downscales it to `target` when larger.
-    /// Pixel passes: conversion (1) and, only when needed, scaling (1).
+    /// Pixel passes: conversion (1) and, only when needed, scaling and alpha clipping (2).
     static func make(from cgImage: CGImage, target: CGSize) throws -> PixelBuffer {
         var format = rgbaFormat
         var source = vImage_Buffer()
@@ -85,7 +93,10 @@ enum PixelBufferFactory {
             rowBytes: rowBytes)
         let scaleError = vImageScale_ARGB8888(&source, &dest, nil, vImage_Flags(kvImageNoFlags))
         Foundation.free(sourceData)
-        guard scaleError == kvImageNoError else {
+        // Lanczos ringing can push a colour above its alpha, which is invalid premultiplied data.
+        let clipError = scaleError == kvImageNoError
+            ? vImageClipToAlpha_RGBA8888(&dest, &dest, vImage_Flags(kvImageNoFlags)) : scaleError
+        guard clipError == kvImageNoError else {
             Foundation.free(destData)
             throw PixelBufferError.conversionFailed
         }

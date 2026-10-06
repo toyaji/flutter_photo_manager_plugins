@@ -4,7 +4,7 @@ import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
-import 'package:photo_manager_native_image/photo_manager_native_image.dart';
+import 'package:photo_manager_native_image/src/native_image_channel.dart';
 
 /// Records calls and lets a test decide each reply.
 class FakeChannel extends NativeImageChannel {

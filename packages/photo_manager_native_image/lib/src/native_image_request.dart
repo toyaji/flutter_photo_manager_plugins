@@ -3,6 +3,7 @@
 // in the LICENSE file.
 
 import 'dart:ffi';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:ffi/ffi.dart';
@@ -12,10 +13,13 @@ import 'package:flutter/services.dart';
 import 'native_image_channel.dart';
 import 'native_image_exception.dart';
 import 'native_image_metrics.dart';
-import 'network_policy.dart';
 
 /// Frees a buffer previously handed over by the platform.
 typedef NativeBufferFree = void Function(Pointer<Uint8> pointer);
+
+/// Replaces `malloc.free` in tests so they can count frees.
+@visibleForTesting
+NativeBufferFree? debugNativeBufferFree;
 
 /// A `malloc` RGBA8888 buffer as described in the platform reply.
 @immutable
@@ -54,14 +58,28 @@ class NativeImageBuffer {
   int get byteLength => rowBytes * height;
 }
 
+/// Decoded pixels are capped at this many [size] squares, matching the
+/// platform decoders, so panoramas stay bounded.
+const int _maxPixelsInTargetSquares = 4;
+
 /// Target dimensions for the Dart-side safety net: scales the image down so
-/// its shorter side is at most [size]. Returns `null` when no resize is needed.
+/// its shorter side is at most [size], then until its area is at most
+/// [_maxPixelsInTargetSquares] squares of [size]. Returns `null` when no
+/// resize is needed.
 ({int width, int height})? resizeTargetFor(int width, int height, int size) {
-  final int shorter = width < height ? width : height;
-  if (shorter <= size) {
+  if (width <= 0 || height <= 0) {
     return null;
   }
-  final double scale = size / shorter;
+  final int shorter = width < height ? width : height;
+  double scale = shorter > size ? size / shorter : 1;
+  final double maxPixels = _maxPixelsInTargetSquares * size * size.toDouble();
+  final double pixels = width * scale * height * scale;
+  if (pixels > maxPixels) {
+    scale *= math.sqrt(maxPixels / pixels);
+  }
+  if (scale >= 1) {
+    return null;
+  }
   return (
     width: (width * scale).round().clamp(1, width),
     height: (height * scale).round().clamp(1, height),
@@ -71,9 +89,8 @@ class NativeImageBuffer {
 /// One native request from send to frame. Owns the buffer between the reply
 /// and the copy into an [ui.ImmutableBuffer].
 ///
-/// With [NetworkPolicy.fallback] a local-only attempt that reports
-/// `icloud_not_downloaded` is followed by one network attempt; only the last
-/// attempt's outcome reaches the caller.
+/// The first attempt is local only. If it reports `icloud_not_downloaded`, one
+/// network attempt follows; only the last attempt's outcome reaches the caller.
 class NativeImageRequest {
   /// Creates a request; nothing is sent until [load] is called.
   NativeImageRequest({
@@ -81,10 +98,9 @@ class NativeImageRequest {
     required this.assetId,
     required this.size,
     required this.isVideo,
-    this.policy = NetworkPolicy.fallback,
     NativeBufferFree? free,
     NativeImageMetrics? metrics,
-  })  : _free = free ?? malloc.free,
+  })  : _free = free ?? debugNativeBufferFree ?? malloc.free,
         _metrics = metrics ?? NativeImageMetrics.instance;
 
   /// The channel the request goes through.
@@ -98,9 +114,6 @@ class NativeImageRequest {
 
   /// Whether the asset is a video (Android picks the MediaStore table).
   final bool isVideo;
-
-  /// Whether and when iCloud downloads are allowed.
-  final NetworkPolicy policy;
 
   final NativeBufferFree _free;
   final NativeImageMetrics _metrics;
@@ -116,22 +129,10 @@ class NativeImageRequest {
   /// for a cancel of the next one.
   int get requestId => _requestId;
 
-  /// Whether [cancel] has been called.
-  bool get isCancelled => _cancelled;
-
   /// Whether [load] has produced its single outcome.
   bool get isSettled => _settled;
 
-  List<bool> get _attempts {
-    switch (policy) {
-      case NetworkPolicy.never:
-        return const <bool>[false];
-      case NetworkPolicy.fallback:
-        return const <bool>[false, true];
-      case NetworkPolicy.always:
-        return const <bool>[true];
-    }
-  }
+  static const List<bool> _attempts = <bool>[false, true];
 
   /// Sends the request and decodes the reply into a frame. Resolves to `null`
   /// when cancelled. Throws [NativeImageException] on failure.
@@ -141,7 +142,7 @@ class NativeImageRequest {
     }
     _sent = true;
     final Stopwatch stopwatch = Stopwatch()..start();
-    final List<bool> attempts = _attempts;
+    const List<bool> attempts = _attempts;
     for (int i = 0; i < attempts.length; i++) {
       if (_cancelled) {
         return _settle(() => null);
@@ -186,7 +187,7 @@ class NativeImageRequest {
         allowNetwork: allowNetwork,
       );
     } on PlatformException catch (exception) {
-      throw NativeImageException.fromPlatform(exception);
+      throw nativeImageExceptionFromPlatform(exception);
     } finally {
       _inFlight = false;
       _metrics.markAnswered();

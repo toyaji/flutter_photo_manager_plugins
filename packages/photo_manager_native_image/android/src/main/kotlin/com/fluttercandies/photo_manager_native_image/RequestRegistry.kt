@@ -49,6 +49,23 @@ class RequestState(
 }
 
 /**
+ * Sends [result] if the engine is still attached; otherwise the reply would be
+ * dropped by the engine, so a buffer it carries is freed instead.
+ */
+fun replyOrFree(
+    result: Result<NativeImageReply?>,
+    attached: Boolean,
+    callback: (Result<NativeImageReply?>) -> Unit,
+    free: (Long) -> Unit,
+) {
+    if (attached) {
+        callback(result)
+    } else {
+        result.getOrNull()?.get("pointer")?.let(free)
+    }
+}
+
+/**
  * Tracks requests between arrival and reply so cancels can be applied before
  * a buffer is allocated. Cancels for ids not yet seen are remembered and
  * consumed by the request when it arrives.

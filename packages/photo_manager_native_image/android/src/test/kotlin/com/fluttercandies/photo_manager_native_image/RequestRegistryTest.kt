@@ -109,6 +109,32 @@ class RequestRegistryTest {
     }
 
     @Test
+    fun replyAfterDetachFreesTheBuffer() {
+        val freed = mutableListOf<Long>()
+        var replied = 0
+        replyOrFree(Result.success(mapOf("pointer" to 0x77L)), attached = false, callback = { replied++ }) { freed.add(it) }
+        assertEquals(0, replied)
+        assertEquals(listOf(0x77L), freed)
+    }
+
+    @Test
+    fun replyWhileAttachedIsDelivered() {
+        val freed = mutableListOf<Long>()
+        var replied = 0
+        replyOrFree(Result.success(mapOf("pointer" to 0x78L)), attached = true, callback = { replied++ }) { freed.add(it) }
+        assertEquals(1, replied)
+        assertTrue(freed.isEmpty())
+    }
+
+    @Test
+    fun replyAfterDetachWithoutBufferFreesNothing() {
+        val freed = mutableListOf<Long>()
+        replyOrFree(Result.success(null), attached = false, callback = {}) { freed.add(it) }
+        replyOrFree(Result.failure(NativeImageError("not_found")), attached = false, callback = {}) { freed.add(it) }
+        assertTrue(freed.isEmpty())
+    }
+
+    @Test
     fun concurrentFinishDeliversOnce() {
         val replies = AtomicInteger()
         val s = state(5) { replies.incrementAndGet() }
