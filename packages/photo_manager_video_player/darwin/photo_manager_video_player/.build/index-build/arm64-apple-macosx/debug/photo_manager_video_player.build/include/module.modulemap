@@ -1,0 +1,3 @@
+module photo_manager_video_player {
+    header "/Users/paul/projects/flutter_photo_manager_plugins/packages/photo_manager_video_player/darwin/photo_manager_video_player/.build/index-build/arm64-apple-macosx/debug/photo_manager_video_player.build/include/photo_manager_video_player-Swift.h"
+}
