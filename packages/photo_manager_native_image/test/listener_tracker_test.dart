@@ -2,7 +2,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:photo_manager_native_image/photo_manager_native_image.dart';
+import 'package:photo_manager_native_image/src/cache_aware_listener_tracker.dart';
 
 class TrackedCompleter extends ImageStreamCompleter
     with CacheAwareListenerTracker {

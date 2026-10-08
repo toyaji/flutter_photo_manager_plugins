@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:photo_manager_native_image/photo_manager_native_image.dart';
+import 'package:photo_manager_native_image/src/native_image_metrics.dart';
 
 void main() {
   test('counter changes notify after the current synchronous work', () async {

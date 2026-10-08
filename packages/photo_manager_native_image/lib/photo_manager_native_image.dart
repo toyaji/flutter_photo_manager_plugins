@@ -6,12 +6,7 @@
 /// trip and cancellation that follows the Flutter image cache.
 library;
 
-export 'src/cache_aware_listener_tracker.dart';
-export 'src/native_asset_image.dart';
-export 'src/native_image_channel.dart';
-export 'src/native_image_exception.dart';
-export 'src/native_image_metrics.dart';
-export 'src/native_image_provider.dart';
-export 'src/native_image_request.dart' show NativeImageBuffer, resizeTargetFor;
-export 'src/native_image_stream_completer.dart';
-export 'src/network_policy.dart';
+export 'src/native_asset_image.dart' show NativeAssetImage;
+export 'src/native_image_exception.dart'
+    show NativeImageErrorCode, NativeImageException;
+export 'src/native_image_provider.dart' show NativeImageProvider;

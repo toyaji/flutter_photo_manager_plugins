@@ -14,6 +14,13 @@ class ThumbnailMathTest {
     }
 
     @Test
+    fun scaledSizeCapsPanoramasAtFourTargetSquares() {
+        assertEquals(Pair(5793, 724), ThumbnailMath.scaledSize(8000, 1000, 1024, 1024))
+        assertEquals(Pair(640, 160), ThumbnailMath.scaledSize(4000, 1000, 160, 160))
+        assertNull(ThumbnailMath.scaledSize(1280, 320, 320, 320))
+    }
+
+    @Test
     fun sampleSizeKeepsShorterSideAtLeastTarget() {
         assertEquals(1, ThumbnailMath.sampleSize(400, 300, 320))
         assertEquals(2, ThumbnailMath.sampleSize(4000, 700, 320))

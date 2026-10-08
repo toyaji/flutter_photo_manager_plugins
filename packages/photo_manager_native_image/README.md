@@ -26,7 +26,7 @@ NativeAssetImage(
 
 | | Android | iOS |
 |---|---|---|
-| Source | `ContentResolver.loadThumbnail` (≤ 768 px), `ImageDecoder` above; `MediaStore.*.Thumbnails` + `BitmapFactory` with orientation fix on API 26–28 | `PHImageManager.requestImage(.aspectFill, .highQualityFormat, .fast)` on a worker queue, `vImage` downscale |
+| Source | MediaStore system thumbnail through `ImageDecoder` (≤ 768 px, the original when the thumbnail is smaller than asked), `ImageDecoder` on the original above; `MediaStore.*.Thumbnails` + `BitmapFactory` with orientation fix on API 26–28 | `PHImageManager.requestImage(.aspectFill, .highQualityFormat, .fast)` on a worker queue, `vImage` downscale |
 | Pixels handed over | `ARGB_8888` → JNI `malloc` | RGBA8888 → `malloc` |
 | JPEG round trips | **0** | **0** |
 | Extra framework | none | `Photos`, `Accelerate` |
@@ -56,7 +56,7 @@ builds the image from the raw descriptor. There is no codec on the Dart side.
 | Sizing | `ThumbnailSize(width, height)` box | `size` = shorter side |
 | Cache key | id, size, format, original flag | id, modified date, size, isVideo |
 | Errors | `StateError` / platform message | `NativeImageException(code)` |
-| iCloud | downloads inline, blocking the request | local first, then one low-priority network attempt (`NetworkPolicy`) |
+| iCloud | downloads inline, blocking the request | local first, then one low-priority network attempt only when needed |
 
 Both providers are plain `ImageProvider`s and can coexist in one app.
 
@@ -86,6 +86,17 @@ from `ImageCache`. On the platform, a request that has not reached step 5 is
 dropped and replies `null`; one that has already allocated still replies with
 the buffer, which Dart frees and discards.
 
+What a cancel stops depends on where the request is:
+
+| Request state | On cancel |
+|---|---|
+| Waiting in the queue | Dropped; no work is done |
+| Decoding a local asset | Runs to the end (milliseconds); the result is discarded |
+| Downloading from iCloud (iOS, network attempt) | The download is cancelled and the slot freed immediately |
+
+Local decodes are not interrupted on purpose: measured on devices, stopping them
+saved little worker time and did not change queue wait or decode time.
+
 Two situations look like "the last listener left" but are not:
 
 - `imageCache.clear()` (memory pressure) detaches only the cache's listener.
@@ -110,8 +121,8 @@ frame". The app owns every policy decision above that.
 | How many requests are in flight | App | Driven by `cacheExtent`, layout changes during a pinch, prefetching. The package queues whatever it is asked and cancels what stops being needed; it does not throttle. |
 | `ImageCache` budget and `clear()` policy | App | The package uses the app's `PaintingBinding.imageCache` and nothing else. No second cache, no disk cache. |
 | Error UI | App | `errorBuilder` receives `NativeImageException`. |
-| iCloud fallback | Package | `NetworkPolicy.fallback` (default): local first, then one network attempt on the low-priority queue. The app only picks the policy. |
-| Cache key | Package | Edited assets get a new key through the modified date. The network policy is *not* part of the key, so the fallback attempt fills the same slot. |
+| iCloud fallback | Package | Local first, then one network attempt on the low-priority queue only when PhotoKit needs it. Nothing to configure. |
+| Cache key | Package | Edited assets get a new key through the modified date. The network attempt fills the same slot as the local one. |
 | Cancellation | Package | Listener tracking in the completer, `cancelRequest` on the channel, `evict(key)` so the next resolve starts fresh. A failed load is evicted too, like `NetworkImage`. |
 | Native worker queues | Package | iOS: `OperationQueue` at `userInitiated`, cores × 2; a second queue at `utility` with 2 slots for network attempts. Android: fixed pool of cores / 2 + 1. |
 | Buffer lifetime | Package | Exactly one reply per request, tracked by a `done` flag. Dart frees on every path. No finalizer, so no double free. |
@@ -128,6 +139,13 @@ The example app's `maxInflight` counter shows the depth the app reached.
 upscales. If it returns something larger than asked (PhotoKit's `.fast`
 resize can), Dart scales it down once through `instantiateCodec`.
 
+Very wide or tall images are also capped at `size² × 4` pixels, so a 1024
+request for an 8000 × 1000 panorama yields 5793 × 724 instead of the full
+32 MB bitmap.
+
+Wide-gamut photos (Display P3) are converted to sRGB on both platforms,
+because Flutter reads the raw pixels as sRGB.
+
 For a square grid cell, ask for the cell's pixel size and draw with
 `BoxFit.cover`. For a dense grid a smaller size over a shared base layer is
 cheaper than one size per column count, because the key never changes during
@@ -141,32 +159,37 @@ a pinch.
 | Code | Meaning | Typical handling |
 |---|---|---|
 | `notFound` | The asset no longer exists | Drop the cell, refresh the album |
-| `icloudNotDownloaded` | iOS only: the asset is in iCloud and the policy did not allow a download, or the download attempt did not succeed | Show a cloud placeholder |
+| `icloudNotDownloaded` | iOS only: the asset is in iCloud and the download did not succeed (for example offline) | Show a cloud placeholder |
 | `decodeFailed` | The platform could not produce pixels | Broken-image placeholder |
+
+On Android, a missing or revoked photo permission has no code of its own and
+arrives as `decodeFailed`; check access with `photo_manager` before building
+the grid.
 
 A failed key is evicted from `ImageCache`, so the next resolve of the same
 provider sends a new request.
 
 ## Instrumentation
 
-`NativeImageMetrics.instance` (a `ChangeNotifier`) counts requests,
-completions, cancels, failures, in-flight depth, request-to-frame latency
-samples, and live native buffers. `liveBuffers` must read 0 whenever the app is
-idle; anything else is a leak. The example app shows all of these in a panel
-and has a button that forces `PaintingBinding.handleMemoryPressure()` so the
-cancellation rules can be checked on a device.
+The example app has a panel that counts requests, completions, cancels,
+failures, in-flight depth, request-to-frame latency, and live native buffers.
+Live buffers must read 0 whenever the app is idle; anything else is a leak. A
+button forces `PaintingBinding.handleMemoryPressure()` so the cancellation
+rules can be checked on a device. These counters are package internals and not
+part of the public API.
 
 ## iCloud (iOS)
 
-`NetworkPolicy` decides whether PhotoKit may download:
+Nothing to configure. A request first asks PhotoKit for a local result. If
+the asset is only in iCloud and the requested size needs the original, one
+more request follows with network access, on a low-priority queue with two
+slots, so downloads never block on-screen thumbnails. The frame fills the same
+cache key. If the download fails too (for example offline), the request ends
+with `icloudNotDownloaded`.
 
-| Policy | Behaviour | Use for |
-|---|---|---|
-| `fallback` (default) | Local first. If the asset is iCloud-only, one more request is sent with network access on the low-priority queue (two slots). The frame fills the same cache key; if that attempt fails too, its error is reported. | Grids and lists |
-| `never` | Local only; iCloud-only assets fail with `icloudNotDownloaded`. | Offline modes, data-saver settings |
-| `always` | Network from the first request. Every request goes through the two-slot download queue, so a grid built with it will crawl. | Detail views |
-
-On Android the policy is ignored; MediaStore assets are always local.
+Small sizes usually never reach the network: in our tests an iPhone answered
+iCloud-only photos up to about 360 px on the shorter side from the on-device
+preview, even offline. On Android all MediaStore assets are local.
 
 ## Requirements
 
@@ -176,9 +199,15 @@ On Android the policy is ignored; MediaStore assets are always local.
 - CocoaPods and Swift Package Manager are both supported on iOS
   (`darwin/` podspec and `Package.swift`).
 
-`NativeAssetImage` defaults to `fit: BoxFit.cover`, `gaplessPlayback: true`,
-and `filterQuality: FilterQuality.low`, the settings a thumbnail grid wants;
-pass your own for other layouts.
+## Public API
+
+The public surface follows `photo_manager_image_provider`:
+
+| This package | photo_manager_image_provider |
+|---|---|
+| `NativeImageProvider(entity, size:)` | `AssetEntityImageProvider(entity, ...)` |
+| `NativeAssetImage(entity, size:, ...)`, an `Image` with the same parameters and defaults | `AssetEntityImage(entity, ...)` |
+| `NativeImageException` / `NativeImageErrorCode` | none; needed to tell an iCloud miss from other failures |
 
 ## Not in scope
 

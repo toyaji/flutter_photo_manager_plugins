@@ -6,8 +6,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import 'network_policy.dart';
-
 /// Counters for the native pipeline, meant for the example app and for
 /// checking a device run (live buffers must return to zero).
 class NativeImageMetrics extends ChangeNotifier {
@@ -28,7 +26,7 @@ class NativeImageMetrics extends ChangeNotifier {
   /// Requests that ended with an error.
   int failed = 0;
 
-  /// Second attempts sent under [NetworkPolicy.fallback].
+  /// Network attempts sent after a local attempt found the asset in iCloud.
   int fallbacks = 0;
 
   /// Requests sent but not yet answered.

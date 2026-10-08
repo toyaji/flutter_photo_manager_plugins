@@ -31,7 +31,6 @@ void main() {
   test('create date is used when modified date is missing', () {
     final NativeImageProvider a =
         NativeImageProvider(entity(createDate: 5), size: 320);
-    expect(a.modifiedDateSecond, 5);
     expect(a, equals(NativeImageProvider(entity(createDate: 5), size: 320)));
     expect(
       a,
@@ -43,13 +42,6 @@ void main() {
     expect(
       NativeImageProvider(entity(type: AssetType.video), size: 320),
       isNot(equals(NativeImageProvider(entity(), size: 320))),
-    );
-  });
-
-  test('network policy does not split the cache', () {
-    expect(
-      NativeImageProvider(entity(), size: 320, network: NetworkPolicy.always),
-      equals(NativeImageProvider(entity(), size: 320)),
     );
   });
 }

@@ -27,9 +27,39 @@ final class NativeImageRequestState {
         return done
     }
 
-    func markCancelled() {
+    private var cancelHook: (() -> Void)?
+
+    /// Installs a hook that stops work already in progress (an iCloud
+    /// download). Returns false, without installing it, if the request was
+    /// cancelled first; passing nil removes the hook.
+    @discardableResult
+    func setCancelHook(_ hook: (() -> Void)?) -> Bool {
         lock.lock(); defer { lock.unlock() }
+        if cancelled && hook != nil { return false }
+        cancelHook = hook
+        return true
+    }
+
+    func markCancelled() {
+        lock.lock()
         cancelled = true
+        let hook = cancelHook
+        cancelHook = nil
+        lock.unlock()
+        hook?()
+    }
+
+    /// Delivers a worker's result. A buffer only becomes Dart's once the reply
+    /// is accepted; if the request was already settled (engine detach), it is
+    /// freed here.
+    @discardableResult
+    func deliver(_ result: Result<NativeImageReply?, Error>, free: (UnsafeMutableRawPointer) -> Void) -> Bool {
+        if finish(result) { return true }
+        if case .success(let reply?) = result, let address = reply["pointer"],
+           let pointer = UnsafeMutableRawPointer(bitPattern: Int(address)) {
+            free(pointer)
+        }
+        return false
     }
 
     /// Returns `true` if this call delivered the reply, `false` if it was
@@ -72,10 +102,9 @@ final class NativeImageRequestRegistry {
     }
 
     func cancel(requestId: Int64) {
-        lock.lock(); defer { lock.unlock() }
-        if let state = pending[requestId] {
-            state.markCancelled()
-        } else {
+        lock.lock()
+        let state = pending[requestId]
+        if state == nil {
             // A cancel that raced an already-sent reply would otherwise pin
             // its id here forever; the set is a hint, so it is safe to drop.
             if cancelledAhead.count >= Self.cancelledAheadLimit {
@@ -83,6 +112,9 @@ final class NativeImageRequestRegistry {
             }
             cancelledAhead.insert(requestId)
         }
+        lock.unlock()
+        // Outside the lock: the cancel hook calls into PhotoKit.
+        state?.markCancelled()
     }
 
     func remove(requestId: Int64) {
@@ -92,11 +124,12 @@ final class NativeImageRequestRegistry {
 
     /// Cancels and drains every pending request (engine detach).
     func cancelAll() -> [NativeImageRequestState] {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
         let states = Array(pending.values)
-        states.forEach { $0.markCancelled() }
         pending.removeAll()
         cancelledAhead.removeAll()
+        lock.unlock()
+        states.forEach { $0.markCancelled() }
         return states
     }
 
