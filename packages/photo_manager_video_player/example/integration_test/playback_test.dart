@@ -18,8 +18,24 @@ import 'package:integration_test/integration_test.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_manager_video_player/photo_manager_video_player.dart';
 
+// PMVP_DIAG: temporary fd 0 diagnostics for the API 28 green-frame failure.
+void _diagFds(String at) {
+  final List<String> fds = <String>[
+    for (int fd = 0; fd < 4; fd++)
+      () {
+        try {
+          return '$fd->${Link('/proc/self/fd/$fd').targetSync()}';
+        } on FileSystemException catch (e) {
+          return '$fd->MISSING(${e.osError?.errorCode})';
+        }
+      }(),
+  ];
+  debugPrintSynchronously('PMVP_DIAG fds at=$at pid=$pid ${fds.join(' ')}');
+}
+
 /// A sample clip from `integration_test/assets`, added to the library once.
 Future<AssetEntity> _clip(String name) async {
+  _diagFds('clip:$name');
   final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
     type: RequestType.video,
     onlyAll: true,
@@ -120,9 +136,11 @@ Future<ui.Image> _capturedFrame(
 }
 
 void main() {
+  _diagFds('main');
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() async {
+    _diagFds('setUpAll');
     final PermissionState state = await PhotoManager.requestPermissionExtend();
     expect(state.hasAccess, isTrue, reason: 'Grant photo access first.');
   });

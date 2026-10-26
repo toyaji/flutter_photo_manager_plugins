@@ -28,7 +28,23 @@ adb -s "$DEVICE" logcat -c || true
 # Streamed rather than dumped at the end, so a run killed by a timeout keeps it.
 adb -s "$DEVICE" logcat -v threadtime > "$ARTIFACTS_DIR/logcat.txt" 2>&1 &
 LOGCAT=$!
-trap 'kill $GRANTS $LOGCAT 2>/dev/null' EXIT
+# PMVP_DIAG: temporary fd 0 diagnostics for the API 28 green-frame failure.
+adb -s "$DEVICE" shell getprop ro.build.fingerprint > "$ARTIFACTS_DIR/fingerprint.txt" 2>&1 || true
+(
+  seen=
+  for _ in $(seq 1 3000); do
+    pid=$(adb -s "$DEVICE" shell pidof com.fluttercandies.example 2>/dev/null | tr -d '\r')
+    if [ -n "$pid" ] && [ "$pid" != "$seen" ]; then
+      seen=$pid
+      { echo "== pid $pid at $(date -u +%T.%N)"
+        adb -s "$DEVICE" shell run-as com.fluttercandies.example ls -l /proc/$pid/fd 2>&1 | head -8
+      } >> "$ARTIFACTS_DIR/app_fds.txt"
+    fi
+    sleep 0.2
+  done
+) &
+FDS=$!
+trap 'kill $GRANTS $LOGCAT $FDS 2>/dev/null' EXIT
 
 status=0
 flutter test integration_test/playback_test.dart -d "$DEVICE" --timeout 120s \
