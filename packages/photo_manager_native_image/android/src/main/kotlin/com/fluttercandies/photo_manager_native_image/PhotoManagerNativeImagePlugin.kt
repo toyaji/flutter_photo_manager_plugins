@@ -88,6 +88,17 @@ class PhotoManagerNativeImagePlugin : FlutterPlugin, NativeImageHostApi {
         }
     }
 
+    override fun requestHdrImage(
+        assetId: String,
+        requestId: Long,
+        width: Long,
+        height: Long,
+        maxHeadroom: Double,
+        callback: (Result<NativeImageReply?>) -> Unit,
+    ) {
+        callback(Result.failure(NativeImageError("unsupported", "HDR pixels are not available on Android.")))
+    }
+
     override fun cancelRequest(requestId: Long) {
         registry.cancel(requestId)
     }

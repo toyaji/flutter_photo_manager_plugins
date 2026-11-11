@@ -109,6 +109,17 @@ protocol NativeImageHostApi {
   /// Errors use the codes `not_found`, `icloud_not_downloaded`, and
   /// `decode_failed`.
   func requestImage(assetId: String, requestId: Int64, width: Int64, height: Int64, isVideo: Bool, allowNetwork: Bool, completion: @escaping (Result<[String: Int64]?, Error>) -> Void)
+  /// Decodes the asset's HDR rendition to a premultiplied RGBA buffer of
+  /// 32-bit floats (`PixelFormat.rgbaFloat32`) allocated with `malloc`, in
+  /// extended sRGB: 1.0 is SDR white and brighter pixels exceed it. Pixels
+  /// brighter than [maxHeadroom] times SDR white (linear) are tone mapped
+  /// down to it. Sizing, the reply, and cancellation match [requestImage].
+  ///
+  /// Only an original that is on the device is read. Errors use the codes
+  /// `not_found`, `icloud_not_downloaded`, `decode_failed`, `not_hdr` (the
+  /// asset has no HDR content), and `unsupported` (the platform or OS
+  /// version cannot produce HDR pixels).
+  func requestHdrImage(assetId: String, requestId: Int64, width: Int64, height: Int64, maxHeadroom: Double, completion: @escaping (Result<[String: Int64]?, Error>) -> Void)
   /// Stops [requestId] if it has not allocated a buffer yet. A cancel that
   /// arrives before its request is remembered and applied when it does.
   func cancelRequest(requestId: Int64) throws
@@ -151,6 +162,37 @@ class NativeImageHostApiSetup {
       }
     } else {
       requestImageChannel.setMessageHandler(nil)
+    }
+    /// Decodes the asset's HDR rendition to a premultiplied RGBA buffer of
+    /// 32-bit floats (`PixelFormat.rgbaFloat32`) allocated with `malloc`, in
+    /// extended sRGB: 1.0 is SDR white and brighter pixels exceed it. Pixels
+    /// brighter than [maxHeadroom] times SDR white (linear) are tone mapped
+    /// down to it. Sizing, the reply, and cancellation match [requestImage].
+    ///
+    /// Only an original that is on the device is read. Errors use the codes
+    /// `not_found`, `icloud_not_downloaded`, `decode_failed`, `not_hdr` (the
+    /// asset has no HDR content), and `unsupported` (the platform or OS
+    /// version cannot produce HDR pixels).
+    let requestHdrImageChannel = FlutterBasicMessageChannel(name: "dev.flutter.pigeon.photo_manager_native_image.NativeImageHostApi.requestHdrImage\(channelSuffix)", binaryMessenger: binaryMessenger, codec: codec)
+    if let api = api {
+      requestHdrImageChannel.setMessageHandler { message, reply in
+        let args = message as! [Any?]
+        let assetIdArg = args[0] as! String
+        let requestIdArg = args[1] as! Int64
+        let widthArg = args[2] as! Int64
+        let heightArg = args[3] as! Int64
+        let maxHeadroomArg = args[4] as! Double
+        api.requestHdrImage(assetId: assetIdArg, requestId: requestIdArg, width: widthArg, height: heightArg, maxHeadroom: maxHeadroomArg) { result in
+          switch result {
+          case .success(let res):
+            reply(wrapResult(res))
+          case .failure(let error):
+            reply(wrapError(error))
+          }
+        }
+      }
+    } else {
+      requestHdrImageChannel.setMessageHandler(nil)
     }
     /// Stops [requestId] if it has not allocated a buffer yet. A cancel that
     /// arrives before its request is remembered and applied when it does.

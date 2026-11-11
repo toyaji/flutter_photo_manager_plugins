@@ -73,6 +73,19 @@ interface NativeImageHostApi {
    */
   fun requestImage(assetId: String, requestId: Long, width: Long, height: Long, isVideo: Boolean, allowNetwork: Boolean, callback: (Result<Map<String, Long>?>) -> Unit)
   /**
+   * Decodes the asset's HDR rendition to a premultiplied RGBA buffer of
+   * 32-bit floats (`PixelFormat.rgbaFloat32`) allocated with `malloc`, in
+   * extended sRGB: 1.0 is SDR white and brighter pixels exceed it. Pixels
+   * brighter than [maxHeadroom] times SDR white (linear) are tone mapped
+   * down to it. Sizing, the reply, and cancellation match [requestImage].
+   *
+   * Only an original that is on the device is read. Errors use the codes
+   * `not_found`, `icloud_not_downloaded`, `decode_failed`, `not_hdr` (the
+   * asset has no HDR content), and `unsupported` (the platform or OS
+   * version cannot produce HDR pixels).
+   */
+  fun requestHdrImage(assetId: String, requestId: Long, width: Long, height: Long, maxHeadroom: Double, callback: (Result<Map<String, Long>?>) -> Unit)
+  /**
    * Stops [requestId] if it has not allocated a buffer yet. A cancel that
    * arrives before its request is remembered and applied when it does.
    */
@@ -99,6 +112,30 @@ interface NativeImageHostApi {
             val isVideoArg = args[4] as Boolean
             val allowNetworkArg = args[5] as Boolean
             api.requestImage(assetIdArg, requestIdArg, widthArg, heightArg, isVideoArg, allowNetworkArg) { result: Result<Map<String, Long>?> ->
+              val error = result.exceptionOrNull()
+              if (error != null) {
+                reply.reply(NativeImageApiPigeonUtils.wrapError(error))
+              } else {
+                val data = result.getOrNull()
+                reply.reply(NativeImageApiPigeonUtils.wrapResult(data))
+              }
+            }
+          }
+        } else {
+          channel.setMessageHandler(null)
+        }
+      }
+      run {
+        val channel = BasicMessageChannel<Any?>(binaryMessenger, "dev.flutter.pigeon.photo_manager_native_image.NativeImageHostApi.requestHdrImage$separatedMessageChannelSuffix", codec)
+        if (api != null) {
+          channel.setMessageHandler { message, reply ->
+            val args = message as List<Any?>
+            val assetIdArg = args[0] as String
+            val requestIdArg = args[1] as Long
+            val widthArg = args[2] as Long
+            val heightArg = args[3] as Long
+            val maxHeadroomArg = args[4] as Double
+            api.requestHdrImage(assetIdArg, requestIdArg, widthArg, heightArg, maxHeadroomArg) { result: Result<Map<String, Long>?> ->
               val error = result.exceptionOrNull()
               if (error != null) {
                 reply.reply(NativeImageApiPigeonUtils.wrapError(error))

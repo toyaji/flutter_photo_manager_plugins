@@ -31,6 +31,25 @@ class FakeChannel extends NativeImageChannel {
     return completer.future;
   }
 
+  /// Request ids that went through the HDR call, with their headroom.
+  final Map<int, double> hdrOf = <int, double>{};
+
+  @override
+  Future<Map<String, int>?> requestHdrImage({
+    required String assetId,
+    required int requestId,
+    required int width,
+    required int height,
+    required double maxHeadroom,
+  }) {
+    requested.add(requestId);
+    hdrOf[requestId] = maxHeadroom;
+    final Completer<Map<String, int>?> completer =
+        Completer<Map<String, int>?>();
+    pending[requestId] = completer;
+    return completer.future;
+  }
+
   @override
   Future<void> cancelRequest(int requestId) async {
     cancelled.add(requestId);
@@ -78,4 +97,28 @@ AssetEntity entity({
     createDateSecond: createDate,
     modifiedDateSecond: modifiedDate,
   );
+}
+
+/// Allocates an opaque float RGBA buffer of `width x height` whose colour
+/// channels are [value], and returns the reply the platform would send.
+Map<String, int> allocateFloatBuffer(
+  int width,
+  int height, {
+  required double value,
+}) {
+  final int rowBytes = width * 16;
+  final Pointer<Float> pointer = malloc.allocate<Float>(rowBytes * height);
+  final List<double> floats = pointer.asTypedList(width * height * 4);
+  for (int i = 0; i < floats.length; i += 4) {
+    floats[i] = value;
+    floats[i + 1] = value;
+    floats[i + 2] = value;
+    floats[i + 3] = 1;
+  }
+  return <String, int>{
+    'pointer': pointer.address,
+    'width': width,
+    'height': height,
+    'rowBytes': rowBytes,
+  };
 }

@@ -52,6 +52,93 @@ final class NativeImageLoader {
         }
     }
 
+    /// HDR decodes read the whole original, so they get their own, narrower queue
+    /// and never hold back SDR thumbnails.
+    private let hdrQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "photo_manager_native_image.hdr"
+        queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = 4
+        return queue
+    }()
+
+    func requestHdr(
+        assetId: String, requestId: Int64, targetSize: CGSize, maxHeadroom: Double,
+        completion: @escaping (Result<NativeImageReply?, Error>) -> Void
+    ) {
+        let state = NativeImageRequestState(requestId: requestId, completion: completion)
+        guard registry.register(state) else {
+            state.finish(.success(nil))
+            return
+        }
+        hdrQueue.addOperation { [weak self] in
+            guard let self = self else {
+                state.finish(.success(nil))
+                return
+            }
+            let result = self.produceHdr(
+                state: state, assetId: assetId, targetSize: targetSize, maxHeadroom: maxHeadroom)
+            self.registry.remove(requestId: requestId)
+            state.deliver(result, free: { Foundation.free($0) })
+        }
+    }
+
+    private func produceHdr(
+        state: NativeImageRequestState, assetId: String, targetSize: CGSize, maxHeadroom: Double
+    ) -> Result<NativeImageReply?, Error> {
+        guard #available(iOS 17.0, *) else {
+            return .failure(NativeImageError(
+                code: "unsupported", message: "HDR pixels need iOS 17 or later.", details: nil))
+        }
+        if state.isCancelled { return .success(nil) }
+        guard let asset = fetchAsset(assetId) else {
+            return .failure(NativeImageError(code: "not_found", message: "No asset with id \(assetId).", details: nil))
+        }
+        guard asset.mediaType == .image else {
+            return .failure(NativeImageError(code: "not_hdr", message: "Not a photo.", details: nil))
+        }
+        if state.isCancelled { return .success(nil) }
+
+        let options = PHImageRequestOptions()
+        options.version = .current
+        options.deliveryMode = .highQualityFormat
+        options.isNetworkAccessAllowed = false
+        options.isSynchronous = true
+        var data: Data?
+        var info: [AnyHashable: Any]?
+        PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) {
+            received, _, _, receivedInfo in
+            data = received
+            info = receivedInfo
+        }
+        if state.isCancelled { return .success(nil) }
+        guard let data = data else {
+            let error = info?[PHImageErrorKey] as? NSError
+            let inCloud = (info?[PHImageResultIsInCloudKey] as? NSNumber)?.boolValue ?? false
+            if inCloud || Self.isNetworkRequired(error) {
+                return .failure(NativeImageError(
+                    code: "icloud_not_downloaded",
+                    message: "The original is in iCloud and was not downloaded.", details: nil))
+            }
+            return .failure(NativeImageError(
+                code: "decode_failed", message: error?.localizedDescription ?? "PhotoKit returned no data.",
+                details: nil))
+        }
+        guard HdrPixelBufferFactory.hasHdrContent(data) else {
+            return .failure(NativeImageError(code: "not_hdr", message: "No HDR content.", details: nil))
+        }
+        if state.isCancelled { return .success(nil) }
+        // No cancel checks past this point: the buffer is Dart's to free.
+        do {
+            let buffer = try HdrPixelBufferFactory.make(from: data, target: targetSize, maxHeadroom: maxHeadroom)
+            return .success(buffer.reply)
+        } catch HdrPixelBufferError.notHdr {
+            return .failure(NativeImageError(code: "not_hdr", message: "No pixel above SDR white.", details: nil))
+        } catch {
+            return .failure(NativeImageError(code: "decode_failed", message: "\(error)", details: nil))
+        }
+    }
+
     func cancel(requestId: Int64) {
         registry.cancel(requestId: requestId)
     }
@@ -62,6 +149,7 @@ final class NativeImageLoader {
         }
         queue.cancelAllOperations()
         networkQueue.cancelAllOperations()
+        hdrQueue.cancelAllOperations()
     }
 
     // MARK: - Worker

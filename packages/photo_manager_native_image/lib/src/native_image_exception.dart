@@ -15,6 +15,12 @@ enum NativeImageErrorCode {
 
   /// The platform could not produce pixels for the asset.
   decodeFailed,
+
+  /// The asset has no HDR content (HDR requests only).
+  notHdr,
+
+  /// The platform or OS version cannot produce HDR pixels (HDR requests only).
+  unsupported,
 }
 
 const Map<NativeImageErrorCode, String> _wireCodes =
@@ -22,6 +28,8 @@ const Map<NativeImageErrorCode, String> _wireCodes =
   NativeImageErrorCode.notFound: 'not_found',
   NativeImageErrorCode.icloudNotDownloaded: 'icloud_not_downloaded',
   NativeImageErrorCode.decodeFailed: 'decode_failed',
+  NativeImageErrorCode.notHdr: 'not_hdr',
+  NativeImageErrorCode.unsupported: 'unsupported',
 };
 
 /// Thrown into the [ImageStream] (and so into `Image.errorBuilder`) when a

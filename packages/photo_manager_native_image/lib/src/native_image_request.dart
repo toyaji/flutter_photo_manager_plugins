@@ -98,6 +98,7 @@ class NativeImageRequest {
     required this.assetId,
     required this.size,
     required this.isVideo,
+    this.hdrMaxHeadroom,
     NativeBufferFree? free,
     NativeImageMetrics? metrics,
   })  : _free = free ?? debugNativeBufferFree ?? malloc.free,
@@ -114,6 +115,10 @@ class NativeImageRequest {
 
   /// Whether the asset is a video (Android picks the MediaStore table).
   final bool isVideo;
+
+  /// When set, the request asks for HDR float pixels tone mapped to this
+  /// headroom instead of RGBA8888. HDR requests never use the network.
+  final double? hdrMaxHeadroom;
 
   final NativeBufferFree _free;
   final NativeImageMetrics _metrics;
@@ -133,6 +138,7 @@ class NativeImageRequest {
   bool get isSettled => _settled;
 
   static const List<bool> _attempts = <bool>[false, true];
+  static const List<bool> _localOnly = <bool>[false];
 
   /// Sends the request and decodes the reply into a frame. Resolves to `null`
   /// when cancelled. Throws [NativeImageException] on failure.
@@ -142,7 +148,7 @@ class NativeImageRequest {
     }
     _sent = true;
     final Stopwatch stopwatch = Stopwatch()..start();
-    const List<bool> attempts = _attempts;
+    final List<bool> attempts = hdrMaxHeadroom == null ? _attempts : _localOnly;
     for (int i = 0; i < attempts.length; i++) {
       if (_cancelled) {
         return _settle(() => null);
@@ -178,14 +184,23 @@ class NativeImageRequest {
     _inFlight = true;
     final Map<String, int>? reply;
     try {
-      reply = await channel.requestImage(
-        assetId: assetId,
-        requestId: _requestId,
-        width: size,
-        height: size,
-        isVideo: isVideo,
-        allowNetwork: allowNetwork,
-      );
+      final double? maxHeadroom = hdrMaxHeadroom;
+      reply = maxHeadroom == null
+          ? await channel.requestImage(
+              assetId: assetId,
+              requestId: _requestId,
+              width: size,
+              height: size,
+              isVideo: isVideo,
+              allowNetwork: allowNetwork,
+            )
+          : await channel.requestHdrImage(
+              assetId: assetId,
+              requestId: _requestId,
+              width: size,
+              height: size,
+              maxHeadroom: maxHeadroom,
+            );
     } on PlatformException catch (exception) {
       throw nativeImageExceptionFromPlatform(exception);
     } finally {
@@ -222,7 +237,9 @@ class NativeImageRequest {
         width: buffer.width,
         height: buffer.height,
         rowBytes: buffer.rowBytes,
-        pixelFormat: ui.PixelFormat.rgba8888,
+        pixelFormat: hdrMaxHeadroom == null
+            ? ui.PixelFormat.rgba8888
+            : ui.PixelFormat.rgbaFloat32,
       );
     } finally {
       immutable.dispose();

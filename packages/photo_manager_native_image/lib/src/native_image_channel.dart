@@ -29,6 +29,15 @@ abstract class NativeImageChannel {
   });
 
   /// See [NativeImageHostApi.cancelRequest].
+  /// See `NativeImageHostApi.requestHdrImage`.
+  Future<Map<String, int>?> requestHdrImage({
+    required String assetId,
+    required int requestId,
+    required int width,
+    required int height,
+    required double maxHeadroom,
+  });
+
   Future<void> cancelRequest(int requestId);
 }
 
@@ -56,6 +65,17 @@ class PigeonNativeImageChannel extends NativeImageChannel {
       isVideo,
       allowNetwork,
     );
+  }
+
+  @override
+  Future<Map<String, int>?> requestHdrImage({
+    required String assetId,
+    required int requestId,
+    required int width,
+    required int height,
+    required double maxHeadroom,
+  }) {
+    return _api.requestHdrImage(assetId, requestId, width, height, maxHeadroom);
   }
 
   @override

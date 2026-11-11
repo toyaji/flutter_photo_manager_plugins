@@ -37,6 +37,19 @@ extension PhotoManagerNativeImagePlugin: NativeImageHostApi {
         )
     }
 
+    func requestHdrImage(
+        assetId: String, requestId: Int64, width: Int64, height: Int64, maxHeadroom: Double,
+        completion: @escaping (Result<[String: Int64]?, Error>) -> Void
+    ) {
+        loader.requestHdr(
+            assetId: assetId,
+            requestId: requestId,
+            targetSize: CGSize(width: CGFloat(width), height: CGFloat(height)),
+            maxHeadroom: maxHeadroom,
+            completion: attachment.mainThreadReply(completion)
+        )
+    }
+
     func cancelRequest(requestId: Int64) throws {
         loader.cancel(requestId: requestId)
     }

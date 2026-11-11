@@ -8,6 +8,7 @@ library;
 
 export 'src/native_asset_hdr_view.dart' show NativeAssetHdrView;
 export 'src/native_asset_image.dart' show NativeAssetImage;
+export 'src/native_hdr_image_provider.dart' show NativeHdrImageProvider;
 export 'src/native_image_exception.dart'
     show NativeImageErrorCode, NativeImageException;
 export 'src/native_image_provider.dart' show NativeImageProvider;

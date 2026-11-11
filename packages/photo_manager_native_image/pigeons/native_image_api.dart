@@ -41,6 +41,25 @@ abstract class NativeImageHostApi {
     bool allowNetwork,
   );
 
+  /// Decodes the asset's HDR rendition to a premultiplied RGBA buffer of
+  /// 32-bit floats (`PixelFormat.rgbaFloat32`) allocated with `malloc`, in
+  /// extended sRGB: 1.0 is SDR white and brighter pixels exceed it. Pixels
+  /// brighter than [maxHeadroom] times SDR white (linear) are tone mapped
+  /// down to it. Sizing, the reply, and cancellation match [requestImage].
+  ///
+  /// Only an original that is on the device is read. Errors use the codes
+  /// `not_found`, `icloud_not_downloaded`, `decode_failed`, `not_hdr` (the
+  /// asset has no HDR content), and `unsupported` (the platform or OS
+  /// version cannot produce HDR pixels).
+  @async
+  Map<String, int>? requestHdrImage(
+    String assetId,
+    int requestId,
+    int width,
+    int height,
+    double maxHeadroom,
+  );
+
   /// Stops [requestId] if it has not allocated a buffer yet. A cancel that
   /// arrives before its request is remembered and applied when it does.
   void cancelRequest(int requestId);

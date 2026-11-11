@@ -1,3 +1,15 @@
+## 0.3.0
+
+- `NativeHdrImageProvider`: loads a photo's HDR rendition as float pixels
+  (`PixelFormat.rgbaFloat32`, extended sRGB) so it can be drawn by Flutter
+  itself on a surface that shows values above SDR white. iOS 17+ decodes the
+  on-device original with its gain map and tone maps to `maxHeadroom`; the
+  network is never used. The load fails with `NativeImageErrorCode.notHdr`,
+  `icloudNotDownloaded` or `unsupported` (Android, iOS below 17) so a caller
+  can keep its SDR image. Requests, cancellation and cache eviction work like
+  `NativeImageProvider`.
+- Existing API unchanged.
+
 ## 0.2.0
 
 - `NativeAssetHdrView`: an opt-in native view that draws an image with its

@@ -146,6 +146,81 @@ void main() {
     await first;
   });
 
+  group('HDR request', () {
+    NativeImageRequest hdrRequest() {
+      return NativeImageRequest(
+        channel: channel,
+        assetId: 'a',
+        size: 64,
+        isVideo: false,
+        hdrMaxHeadroom: 1.6,
+        free: (Pointer<Uint8> p) {
+          frees++;
+          malloc.free(p);
+        },
+        metrics: metrics,
+      );
+    }
+
+    test('goes through the HDR call and decodes float pixels', () async {
+      final NativeImageRequest r = hdrRequest();
+      final Future<ui.FrameInfo?> future = r.load();
+      expect(channel.hdrOf[r.requestId], 1.6);
+      channel.reply(r.requestId, allocateFloatBuffer(8, 6, value: 1.2));
+      final ui.FrameInfo? frame = await future;
+      expect(frame, isNotNull);
+      expect(frame!.image.width, 8);
+      expect(frame.image.height, 6);
+      expect(frees, 1);
+      expect(metrics.liveBuffers, 0);
+      frame.image.dispose();
+    });
+
+    test('an iCloud miss is reported, never retried over the network',
+        () async {
+      final NativeImageRequest r = hdrRequest();
+      final Future<ui.FrameInfo?> future = r.load();
+      channel.fail(r.requestId, 'icloud_not_downloaded');
+      await expectLater(
+        future,
+        throwsA(
+          isA<NativeImageException>().having(
+            (NativeImageException e) => e.code,
+            'code',
+            NativeImageErrorCode.icloudNotDownloaded,
+          ),
+        ),
+      );
+      expect(channel.requested, hasLength(1));
+    });
+
+    test('an asset without HDR content fails with notHdr', () async {
+      final NativeImageRequest r = hdrRequest();
+      final Future<ui.FrameInfo?> future = r.load();
+      channel.fail(r.requestId, 'not_hdr');
+      await expectLater(
+        future,
+        throwsA(
+          isA<NativeImageException>().having(
+            (NativeImageException e) => e.code,
+            'code',
+            NativeImageErrorCode.notHdr,
+          ),
+        ),
+      );
+    });
+
+    test('cancel is forwarded and the late buffer is freed', () async {
+      final NativeImageRequest r = hdrRequest();
+      final Future<ui.FrameInfo?> future = r.load();
+      r.cancel();
+      expect(channel.cancelled, <int>[r.requestId]);
+      channel.reply(r.requestId, allocateFloatBuffer(4, 4, value: 1.2));
+      expect(await future, isNull);
+      expect(frees, 1);
+    });
+  });
+
   group('iCloud fallback', () {
     test('icloud miss triggers one network attempt with a new id', () async {
       final NativeImageRequest r = request();
