@@ -55,7 +55,7 @@ class NativeImageDecoder(private val context: Context) {
 
     @TargetApi(Build.VERSION_CODES.Q)
     private fun decodeQ(uri: Uri, width: Int, height: Int, isVideo: Boolean): Bitmap {
-        if (maxOf(width, height) <= ThumbnailMath.SYSTEM_THUMBNAIL_MAX) {
+        if (ThumbnailMath.triesSystemThumbnail(width, height, isVideo)) {
             // A cached system thumbnail can be unreadable; the source still is.
             val thumbnail = try {
                 decodeSystemThumbnail(uri, width, height)
@@ -63,7 +63,9 @@ class NativeImageDecoder(private val context: Context) {
                 null
             }
             if (thumbnail != null) {
-                if (ThumbnailMath.coversTarget(thumbnail.width, thumbnail.height, width, height)) return thumbnail
+                if (ThumbnailMath.keepsSystemThumbnail(thumbnail.width, thumbnail.height, width, height, isVideo)) {
+                    return thumbnail
+                }
                 thumbnail.recycle()
             }
         }

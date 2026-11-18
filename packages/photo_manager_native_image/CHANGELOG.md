@@ -18,6 +18,13 @@
   image. On Android the cache owns its bitmaps, so views no longer recycle them.
 - Existing API unchanged.
 
+## 0.1.1
+
+- Android: images larger than 256 px decode from the original instead of the
+  MediaStore system thumbnail, which is a recompressed JPEG and looks soft at
+  grid sizes. Videos keep the system thumbnail up to 768 px, even when it is
+  smaller than asked, so every size of one video shows the same frame.
+
 ## 0.1.0
 
 - `NativeImageProvider`, `NativeAssetImage`, `NativeImageException` /

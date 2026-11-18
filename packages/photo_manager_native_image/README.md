@@ -26,7 +26,7 @@ NativeAssetImage(
 
 | | Android | iOS |
 |---|---|---|
-| Source | MediaStore system thumbnail through `ImageDecoder` (≤ 768 px, the original when the thumbnail is smaller than asked), `ImageDecoder` on the original above; `MediaStore.*.Thumbnails` + `BitmapFactory` with orientation fix on API 26–28 | `PHImageManager.requestImage(.aspectFill, .highQualityFormat, .fast)` on a worker queue, `vImage` downscale |
+| Source | MediaStore system thumbnail through `ImageDecoder` (images ≤ 256 px with the original when the thumbnail is smaller than asked; videos ≤ 768 px, kept even when smaller), `ImageDecoder` on the original above; `MediaStore.*.Thumbnails` + `BitmapFactory` with orientation fix on API 26–28 | `PHImageManager.requestImage(.aspectFill, .highQualityFormat, .fast)` on a worker queue, `vImage` downscale |
 | Pixels handed over | `ARGB_8888` → JNI `malloc` | RGBA8888 → `malloc` |
 | JPEG round trips | **0** | **0** |
 | Extra framework | none | `Photos`, `Accelerate` |
