@@ -23,6 +23,27 @@ class ThumbnailMathTest {
     }
 
     @Test
+    fun imagesUseTheSystemThumbnailOnlyForSmallSizes() {
+        assertTrue(ThumbnailMath.triesSystemThumbnail(256, 256, isVideo = false))
+        assertFalse(ThumbnailMath.triesSystemThumbnail(257, 257, isVideo = false))
+        assertFalse(ThumbnailMath.triesSystemThumbnail(400, 400, isVideo = false))
+    }
+
+    @Test
+    fun videosUseTheSystemThumbnailUpToItsLargerLimit() {
+        assertTrue(ThumbnailMath.triesSystemThumbnail(720, 720, isVideo = true))
+        assertTrue(ThumbnailMath.triesSystemThumbnail(768, 768, isVideo = true))
+        assertFalse(ThumbnailMath.triesSystemThumbnail(769, 769, isVideo = true))
+    }
+
+    @Test
+    fun aSmallerSystemThumbnailIsKeptOnlyForVideos() {
+        assertTrue(ThumbnailMath.keepsSystemThumbnail(512, 384, 400, 400, isVideo = true))
+        assertFalse(ThumbnailMath.keepsSystemThumbnail(512, 384, 400, 400, isVideo = false))
+        assertTrue(ThumbnailMath.keepsSystemThumbnail(512, 384, 256, 256, isVideo = false))
+    }
+
+    @Test
     fun sampleSizeKeepsShorterSideAtLeastTarget() {
         assertEquals(1, ThumbnailMath.sampleSize(400, 300, 320))
         assertEquals(2, ThumbnailMath.sampleSize(4000, 700, 320))
